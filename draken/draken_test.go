@@ -1,18 +1,22 @@
 package draken
 
 import (
-   "41.neocities.org/widevine"
-   "bytes"
-   "encoding/base64"
-   "fmt"
-   "os"
-   "os/exec"
-   "strings"
    "testing"
    "time"
 )
 
-var films = []struct {
+func Test(t *testing.T) {
+   for _, test1 := range tests {
+      var movie1 Movie
+      err := movie1.New(test1.custom_id)
+      if err != nil {
+         t.Fatal(err)
+      }
+      time.Sleep(time.Second)
+   }
+}
+
+var tests = []struct {
    content_id string
    custom_id  string
    key_id     string
@@ -30,15 +34,4 @@ var films = []struct {
       custom_id:  "the-card-counter",
       url:        "drakenfilm.se/film/the-card-counter",
    },
-}
-
-func Test(t *testing.T) {
-   for _, film := range films {
-      var movie FullMovie
-      if err := movie.New(film.custom_id); err != nil {
-         t.Fatal(err)
-      }
-      fmt.Printf("%+v\n", movie)
-      time.Sleep(99 * time.Millisecond)
-   }
 }
