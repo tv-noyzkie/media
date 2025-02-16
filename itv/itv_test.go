@@ -1,12 +1,7 @@
 package itv
 
 import (
-   "41.neocities.org/widevine"
-   "encoding/base64"
    "fmt"
-   "io"
-   "os"
-   "path"
    "testing"
    "time"
 )
