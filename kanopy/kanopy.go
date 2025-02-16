@@ -56,30 +56,6 @@ const (
    x_version  = "!/!/!/!"
 )
 
-func (n *Login) Membership() (*Membership, error) {
-   req, _ := http.NewRequest("", "https://www.kanopy.com", nil)
-   req.URL.Path = "/kapi/memberships"
-   req.URL.RawQuery = "userId=" + strconv.Itoa(n.UserId)
-   req.Header = http.Header{
-      "authorization": {"Bearer " + n.Jwt},
-      "user-agent":    {user_agent},
-      "x-version":     {x_version},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   var value struct {
-      List []Membership
-   }
-   err = json.NewDecoder(resp.Body).Decode(&value)
-   if err != nil {
-      return nil, err
-   }
-   return &value.List[0], nil
-}
-
 func (n *Login) Unmarshal(data []byte) error {
    return json.Unmarshal(data, n)
 }
@@ -110,35 +86,6 @@ type Client struct {
    Login    *Login
 }
 
-func (Login) Marshal(email, password string) ([]byte, error) {
-   data, err := json.Marshal(map[string]any{
-      "credentialType": "email",
-      "emailUser": map[string]string{
-         "email":    email,
-         "password": password,
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://www.kanopy.com/kapi/login", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "content-type": {"application/json"},
-      "user-agent":   {user_agent},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
 func (m *Manifest) Mpd() (*http.Response, error) {
    req, err := http.NewRequest("", m.Url, nil)
    if err != nil {
@@ -167,4 +114,55 @@ func (c *Client) License(data []byte) ([]byte, error) {
    }
    defer resp.Body.Close()
    return io.ReadAll(resp.Body)
+}
+func (Login) Marshal(email, password string) ([]byte, error) {
+   data, err := json.Marshal(map[string]any{
+      "credentialType": "email",
+      "emailUser": map[string]string{
+         "email":    email,
+         "password": password,
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://www.kanopy.com/kapi/login", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "content-type": {"application/json"},
+      "user-agent":   {user_agent},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+func (n *Login) Membership() (*Membership, error) {
+   req, _ := http.NewRequest("", "https://www.kanopy.com", nil)
+   req.URL.Path = "/kapi/memberships"
+   req.URL.RawQuery = "userId=" + strconv.Itoa(n.UserId)
+   req.Header = http.Header{
+      "authorization": {"Bearer " + n.Jwt},
+      "user-agent":    {user_agent},
+      "x-version":     {x_version},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   var value struct {
+      List []Membership
+   }
+   err = json.NewDecoder(resp.Body).Decode(&value)
+   if err != nil {
+      return nil, err
+   }
+   return &value.List[0], nil
 }

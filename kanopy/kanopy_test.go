@@ -1,11 +1,8 @@
 package kanopy
 
 import (
-   "41.neocities.org/widevine"
-   "encoding/base64"
    "fmt"
    "net/http"
-   "os"
    "os/exec"
    "strings"
    "testing"
@@ -38,44 +35,29 @@ func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func Test(t *testing.T) {
    http.DefaultClient.Transport = transport{}
-   var token WebToken
-   t.Run("Marshal", func(t *testing.T) {
-      data, err := exec.Command("password", "kanopy.com").Output()
+   data, err := exec.Command("password", "kanopy.com").Output()
+   if err != nil {
+      t.Fatal(err)
+   }
+   email, password, _ := strings.Cut(string(data), ":")
+   var login1 Login
+   data, err = login1.Marshal(email, password)
+   if err != nil {
+      t.Fatal(err)
+   }
+   err = login1.Unmarshal(data)
+   if err != nil {
+      t.Fatal(err)
+   }
+   member, err := login1.Membership()
+   if err != nil {
+      t.Fatal(err)
+   }
+   for _, test := range tests {
+      _, err = login1.Plays(member, test.video_id)
       if err != nil {
          t.Fatal(err)
       }
-      email, password, _ := strings.Cut(string(data), ":")
-      data, err = token.Marshal(email, password)
-      if err != nil {
-         t.Fatal(err)
-      }
-      os.WriteFile("ignore/token.txt", data, os.ModePerm)
-   })
-   t.Run("Unmarshal", func(t *testing.T) {
-      data, err := os.ReadFile("ignore/token.txt")
-      if err != nil {
-         t.Fatal(err)
-      }
-      err = token.Unmarshal(data)
-      if err != nil {
-         t.Fatal(err)
-      }
-   })
-   var member *Membership
-   t.Run("Membership", func(t *testing.T) {
-      var err error
-      member, err = token.Membership()
-      if err != nil {
-         t.Fatal(err)
-      }
-   })
-   t.Run("Plays", func(t *testing.T) {
-      for _, test := range tests {
-         _, err := token.Plays(member, test.video_id)
-         if err != nil {
-            t.Fatal(err)
-         }
-         time.Sleep(time.Second)
-      }
-   })
+      time.Sleep(time.Second)
+   }
 }
