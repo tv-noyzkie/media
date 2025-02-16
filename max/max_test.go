@@ -1,8 +1,6 @@
 package max
 
 import (
-   "41.neocities.org/widevine"
-   "encoding/base64"
    "fmt"
    "os"
    "testing"
@@ -32,31 +30,22 @@ var tests = []struct {
 }
 
 func TestLicense(t *testing.T) {
-   home, err := os.UserHomeDir()
+   data, err := os.ReadFile("login.txt")
    if err != nil {
       t.Fatal(err)
    }
-   private_key, err := os.ReadFile(home + "/widevine/private_key.pem")
-   if err != nil {
-      t.Fatal(err)
-   }
-   client_id, err := os.ReadFile(home + "/widevine/client_id.bin")
-   if err != nil {
-      t.Fatal(err)
-   }
-   data, err := os.ReadFile(home + "/max.txt")
-   if err != nil {
-      t.Fatal(err)
-   }
-   var login LinkLogin
-   err = login.Unmarshal(data)
+   var login1 Login
+   err = login1.Unmarshal(data)
    if err != nil {
       t.Fatal(err)
    }
    for _, test := range tests {
       var watch WatchUrl
-      watch.UnmarshalText([]byte(test.url))
-      play, err := login.Playback(&watch)
+      err = watch.Set(test.url)
+      if err != nil {
+         t.Fatal(err)
+      }
+      play, err := login1.Playback(&watch)
       if err != nil {
          t.Fatal(err)
       }

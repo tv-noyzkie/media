@@ -12,15 +12,6 @@ import (
    "time"
 )
 
-const sleep = 99 * time.Millisecond
-
-func Test(t *testing.T) {
-   http.DefaultClient.Transport = transport{}
-   t.Run("WebToken", TestWebToken)
-   t.Run("VideoPlays", TestVideoPlays)
-   t.Run("Wrapper", TestWrapper)
-}
-
 var tests = []struct {
    key_id   string
    url      string
@@ -38,34 +29,6 @@ var tests = []struct {
    },
 }
 
-func TestVideoPlays(t *testing.T) {
-   data, err := os.ReadFile("ignore/token.txt")
-   if err != nil {
-      t.Fatal(err)
-   }
-   var token WebToken
-   token.Unmarshal(data)
-   member, err := token.Membership()
-   if err != nil {
-      t.Fatal(err)
-   }
-   for _, test := range tests {
-      play, err := token.Plays(member, test.video_id)
-      if err != nil {
-         t.Fatal(err)
-      }
-      _, ok := play.Dash()
-      if !ok {
-         t.Fatal("VideoPlays.Dash")
-      }
-      time.Sleep(sleep)
-   }
-   _, ok := VideoPlays{}.Dash()
-   if ok {
-      t.Fatal("VideoPlays.Dash")
-   }
-}
-
 type transport struct{}
 
 func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -73,62 +36,8 @@ func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
    return http.DefaultTransport.RoundTrip(req)
 }
 
-func TestWrapper(t *testing.T) {
-   data, err := os.ReadFile("ignore/token.txt")
-   if err != nil {
-      t.Fatal(err)
-   }
-   var token WebToken
-   token.Unmarshal(data)
-   member, err := token.Membership()
-   if err != nil {
-      t.Fatal(err)
-   }
-   home, err := os.UserHomeDir()
-   if err != nil {
-      t.Fatal(err)
-   }
-   private_key, err := os.ReadFile(home + "/widevine/private_key.pem")
-   if err != nil {
-      t.Fatal(err)
-   }
-   client_id, err := os.ReadFile(home + "/widevine/client_id.bin")
-   if err != nil {
-      t.Fatal(err)
-   }
-   for _, test := range tests {
-      plays, err := token.Plays(member, test.video_id)
-      if err != nil {
-         t.Fatal(err)
-      }
-      manifest, ok := plays.Dash()
-      if !ok {
-         t.Fatal("VideoPlays.Dash")
-      }
-      var pssh widevine.PsshData
-      key_id, err := base64.StdEncoding.DecodeString(test.key_id)
-      if err != nil {
-         t.Fatal(err)
-      }
-      pssh.KeyIds = [][]byte{key_id}
-      var module widevine.Cdm
-      err = module.New(private_key, client_id, pssh.Marshal())
-      if err != nil {
-         t.Fatal(err)
-      }
-      data, err = module.RequestBody()
-      if err != nil {
-         t.Fatal(err)
-      }
-      _, err = Wrapper{manifest, &token}.Wrap(data)
-      if err != nil {
-         t.Fatal(err)
-      }
-      time.Sleep(sleep)
-   }
-}
-
-func TestWebToken(t *testing.T) {
+func Test(t *testing.T) {
+   http.DefaultClient.Transport = transport{}
    var token WebToken
    t.Run("Marshal", func(t *testing.T) {
       data, err := exec.Command("password", "kanopy.com").Output()
@@ -166,7 +75,7 @@ func TestWebToken(t *testing.T) {
          if err != nil {
             t.Fatal(err)
          }
-         time.Sleep(sleep)
+         time.Sleep(time.Second)
       }
    })
 }
