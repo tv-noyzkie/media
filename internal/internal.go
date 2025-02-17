@@ -19,6 +19,38 @@ import (
    "strings"
 )
 
+func Mpd(client DashClient) ([]dash.Representation, error) {
+   resp, err := client.Mpd()
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return nil, err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   media.Set(resp.Request.URL)
+   return slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   ), nil
+}
+
+type DashClient interface {
+   Mpd() (*http.Response, error)
+}
+
+// must return byte slice to cover unwrapping
+type WidevineClient interface {
+   License([]byte) ([]byte, error)
+}
+
 const (
    widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
@@ -96,15 +128,6 @@ type Stream struct {
    pssh       []byte
 }
 
-// must return byte slice to cover unwrapping
-type WidevineClient interface {
-   License([]byte) ([]byte, error)
-}
-
-type DashClient interface {
-   Mpd() (*http.Response, error)
-}
-
 func (s *Stream) key() ([]byte, error) {
    if s.key_id == nil {
       return nil, nil
@@ -157,29 +180,6 @@ func (s *Stream) key() ([]byte, error) {
          return key, nil
       }
    }
-}
-
-func Mpd(client DashClient) ([]dash.Representation, error) {
-   resp, err := client.Mpd()
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   media.Set(resp.Request.URL)
-   return slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   ), nil
 }
 
 func get(address *url.URL) ([]byte, error) {

@@ -15,6 +15,14 @@ import (
    "time"
 )
 
+func (v Vod) Mpd() (*http.Response, error) {
+   return http.Get(v.PlaybackUrl)
+}
+
+type Vod struct {
+   PlaybackUrl string
+}
+
 func (m *Metadata) Vod() (*Vod, error) {
    req, _ := http.NewRequest("", "https://lemonade.nbc.com", nil)
    req.URL.Path = func() string {
@@ -94,7 +102,6 @@ func (m *Metadata) New(guid int) error {
    return nil
 }
 
-// NO ANONYMOUS QUERY
 const bonanza_page = `
 query bonanzaPage(
    $app: NBCUBrands!
@@ -121,7 +128,7 @@ query bonanzaPage(
       }
    }
 }
-`
+` // do not use `query(`
 
 // this is better than strings.Replace and strings.ReplaceAll
 func graphql_compact(data string) string {
@@ -129,14 +136,6 @@ func graphql_compact(data string) string {
 }
 
 const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
-
-func (v Vod) Mpd() (*http.Response, error) {
-   return http.Get(v.PlaybackUrl)
-}
-
-type Vod struct {
-   PlaybackUrl string
-}
 
 type Client struct {
    Time string
