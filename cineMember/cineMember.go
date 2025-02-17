@@ -9,6 +9,58 @@ import (
    "strings"
 )
 
+func (a Address) Article() (*Article, error) {
+   data, err := json.Marshal(map[string]any{
+      "query": query_article,
+      "variables": map[string]string{
+         "articleUrlSlug": a[0],
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   resp, err := http.Post(
+      "https://api.audienceplayer.com/graphql/2/user",
+      "application/json", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   var value struct {
+      Data struct {
+         Article Article
+      }
+   }
+   err = json.NewDecoder(resp.Body).Decode(&value)
+   if err != nil {
+      return nil, err
+   }
+   return &value.Data.Article, nil
+}
+
+func (User) Marshal(email, password string) ([]byte, error) {
+   data, err := json.Marshal(map[string]any{
+      "query": query_user,
+      "variables": map[string]string{
+         "email": email,
+         "password": password,
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   resp, err := http.Post(
+      "https://api.audienceplayer.com/graphql/2/user",
+      "application/json", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 const query_user = `
 mutation UserAuthenticate($email: String, $password: String) {
    UserAuthenticate(email: $email, password: $password) {
@@ -95,58 +147,6 @@ func (a *Address) Set(data string) error {
    data = strings.TrimPrefix(data, "/nl")
    (*a)[0] = strings.TrimPrefix(data, "/")
    return nil
-}
-
-func (User) Marshal(email, password string) ([]byte, error) {
-   data, err := json.Marshal(map[string]any{
-      "query": query_user,
-      "variables": map[string]string{
-         "email": email,
-         "password": password,
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   resp, err := http.Post(
-      "https://api.audienceplayer.com/graphql/2/user",
-      "application/json", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (a Address) Article() (*Article, error) {
-   data, err := json.Marshal(map[string]any{
-      "query": query_article,
-      "variables": map[string]string{
-         "articleUrlSlug": a[0],
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   resp, err := http.Post(
-      "https://api.audienceplayer.com/graphql/2/user",
-      "application/json", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   var value struct {
-      Data struct {
-         Article Article
-      }
-   }
-   err = json.NewDecoder(resp.Body).Decode(&value)
-   if err != nil {
-      return nil, err
-   }
-   return &value.Data.Article, nil
 }
 
 type Asset struct {
