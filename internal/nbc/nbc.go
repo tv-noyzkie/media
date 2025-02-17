@@ -8,76 +8,16 @@ import (
    "fmt"
    "io"
    "log"
+   "net/url"
    "path/filepath"
    "slices"
    "41.neocities.org/x/http"
    "os"
 )
 
-func (f *flags) do_print() error {
-   var metadata nbc.Metadata
-   err := metadata.New(f.nbc)
-   if err != nil {
-      return err
-   }
-   vod, err := metadata.Vod()
-   if err != nil {
-      return err
-   }
-   resp, err := vod.Mpd()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   err = os.WriteFile("mpd.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   var line bool
-   for _, represent := range represents {
-      if line {
-         fmt.Println()
-      } else {
-         line = true
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-func (f *flags) do_download() error {
-   data, err := os.ReadFile("mpd.txt")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   for represent := range media.Representation() {
-      if represent.Id == f.representation {
-         var client nbc.Client
-         client.New()
-         f.s.Client = &client
-         return f.s.Download(&represent)
-      }
-   }
-   return nil
+func write_file(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
 }
 
 func main() {
@@ -112,15 +52,103 @@ type flags struct {
    nbc            int
    representation string
    s              internal.Stream
+   home string
 }
 
 func (f *flags) New() error {
-   home, err := os.UserHomeDir()
+   var err error
+   f.home, err = os.UserHomeDir()
    if err != nil {
       return err
    }
-   home = filepath.ToSlash(home)
-   f.s.ClientId = home + "/widevine/client_id.bin"
-   f.s.PrivateKey = home + "/widevine/private_key.pem"
+   f.home = filepath.ToSlash(f.home) + "/media"
+   f.s.ClientId = f.home + "/client_id.bin"
+   f.s.PrivateKey = f.home + "/private_key.pem"
+   return nil
+}
+
+func (f *flags) do_print() error {
+   var metadata nbc.Metadata
+   err := metadata.New(f.nbc)
+   if err != nil {
+      return err
+   }
+   vod, err := metadata.Vod()
+   if err != nil {
+      return err
+   }
+   resp, err := vod.Mpd()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   // Body
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   err = write_file(f.home + "/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   // Request.URL
+   err = write_file(
+      f.home + "/mpd_url", []byte(resp.Request.URL.String()),
+   )
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   represents := slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   var line bool
+   for _, represent := range represents {
+      if line {
+         fmt.Println()
+      } else {
+         line = true
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
+func (f *flags) do_download() error {
+   // Body
+   data, err := os.ReadFile(f.home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   // Request.URL
+   data, err = os.ReadFile(f.home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == f.representation {
+         var client nbc.Client
+         client.New()
+         f.s.Client = &client
+         return f.s.Download(&represent)
+      }
+   }
    return nil
 }
