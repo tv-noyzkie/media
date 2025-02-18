@@ -20,74 +20,44 @@ import (
    "strings"
 )
 
-// wikipedia.org/wiki/Dynamic_Adaptive_Streaming_over_HTTP
-type Stream struct {
-   Client     WidevineClient
-   ClientId   string
-   PrivateKey string
-   key_id     []byte
-   pssh       []byte
+func WriteFile(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
 }
 
-func (s *Stream) Bravo(id string, raw_body, raw_url []byte) error {
-   var base url.URL
-   err := base.UnmarshalBinary(raw_url)
-   if err != nil {
-      return err
-   }
+func Create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+// try to get PSSH from DASH then MP4
+func (s *Stream) Download(base *url.URL, body []byte, id string) error {
    var media dash.Mpd
-   err = media.Unmarshal(raw_body)
+   err := media.Unmarshal(body)
    if err != nil {
       return err
    }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == id {
-         return s.Download(&represent)
-      }
-   }
-   return nil
-}
-
-// must return byte slice to cover unwrapping
-type WidevineClient interface {
-   License([]byte) ([]byte, error)
-}
-
-func Alfa(data []byte) error {
-   var media dash.Mpd
-   err := media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
+   media.Set(base)
    represents := slices.SortedFunc(media.Representation(),
       func(a, b dash.Representation) int {
          return a.Bandwidth - b.Bandwidth
       },
    )
    for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
-}
-
-const (
-   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
-   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-)
-
-func (s *Stream) Download(represent *dash.Representation) error {
-   for _, protect := range represent.ContentProtection {
-      if protect.SchemeIdUri == widevine_urn {
-         if protect.Pssh != "" {
+      switch id {
+      case "":
+         if i >= 1 {
+            fmt.Println()
+         }
+         fmt.Println(&represent)
+      case represent.Id:
+         for _, protect := range represent.ContentProtection {
+            if protect.SchemeIdUri != widevine_urn {
+               continue
+            }
+            if protect.Pssh == "" {
+               continue
+            }
             data, err := base64.StdEncoding.DecodeString(protect.Pssh)
             if err != nil {
                return err
@@ -102,23 +72,47 @@ func (s *Stream) Download(represent *dash.Representation) error {
                return err
             }
             s.pssh = box.Data
-            // fallback to INIT
             break
          }
+         ext, err := get_ext(&represent)
+         if err != nil {
+            return err
+         }
+         if represent.SegmentBase != nil {
+            return s.segment_base(&represent, ext)
+         }
+         if represent.SegmentList != nil {
+            return s.segment_list(&represent, ext)
+         }
+         return s.segment_template(&represent, ext)
       }
    }
-   ext, err := get_ext(represent)
-   if err != nil {
-      return err
-   }
-   if represent.SegmentBase != nil {
-      return s.segment_base(represent, ext)
-   }
-   if represent.SegmentList != nil {
-      return s.segment_list(represent, ext)
-   }
-   return s.segment_template(represent, ext)
+   return nil
 }
+
+// wikipedia.org/wiki/Dynamic_Adaptive_Streaming_over_HTTP
+type Stream struct {
+   Client     WidevineClient
+   ClientId   string
+   PrivateKey string
+   key_id     []byte
+   pssh       []byte
+}
+
+// must return byte slice to cover unwrapping
+type WidevineClient interface {
+   License([]byte) ([]byte, error)
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
+}
+
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
 
 func (s *Stream) init_protect(data []byte) ([]byte, error) {
    var file container.File
@@ -228,7 +222,7 @@ func get_ext(represent *dash.Representation) (string, error) {
 }
 
 func (s *Stream) segment_base(represent *dash.Representation, ext string) error {
-   file, err := os.Create(ext)
+   file, err := Create(ext)
    if err != nil {
       return err
    }
@@ -304,7 +298,7 @@ func (s *Stream) segment_base(represent *dash.Representation, ext string) error 
 func (s *Stream) segment_list(
    represent *dash.Representation, ext string,
 ) error {
-   file, err := os.Create(ext)
+   file, err := Create(ext)
    if err != nil {
       return err
    }
@@ -443,7 +437,7 @@ func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
 func (s *Stream) segment_template(
    represent *dash.Representation, ext string,
 ) error {
-   file, err := os.Create(ext)
+   file, err := Create(ext)
    if err != nil {
       return err
    }
