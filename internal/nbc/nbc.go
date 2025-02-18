@@ -10,6 +10,53 @@ import (
    "path/filepath"
 )
 
+func (f *flags) do_download() error {
+   raw_url, err := os.ReadFile(f.home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   raw_body, err := os.ReadFile(f.home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var client nbc.Client
+   client.New()
+   f.s.Client = &client
+   return f.s.Bravo(f.representation, raw_body, raw_url)
+}
+
+func (f *flags) do_print() error {
+   var metadata nbc.Metadata
+   err := metadata.New(f.nbc)
+   if err != nil {
+      return err
+   }
+   vod, err := metadata.Vod()
+   if err != nil {
+      return err
+   }
+   resp, err := vod.Mpd()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   err = write_file(f.home + "/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   err = write_file(
+      f.home + "/mpd_url", []byte(resp.Request.URL.String()),
+   )
+   if err != nil {
+      return err
+   }
+   return internal.Alfa(data)
+}
+
 func write_file(name string, data []byte) error {
    log.Println("WriteFile", name)
    return os.WriteFile(name, data, os.ModePerm)
@@ -58,48 +105,4 @@ func (f *flags) New() error {
    f.s.ClientId = f.home + "/client_id.bin"
    f.s.PrivateKey = f.home + "/private_key.pem"
    return nil
-}
-
-func (f *flags) do_print() error {
-   var metadata nbc.Metadata
-   err := metadata.New(f.nbc)
-   if err != nil {
-      return err
-   }
-   vod, err := metadata.Vod()
-   if err != nil {
-      return err
-   }
-   resp, err := vod.Mpd()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   err = write_file(f.home + "/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   err = write_file(
-      f.home + "/mpd_url", []byte(resp.Request.URL.String()),
-   )
-   if err != nil {
-      return err
-   }
-   return alfa(data)
-}
-
-func (f *flags) do_download() error {
-   raw_url, err := os.ReadFile(f.home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   raw_body, err := os.ReadFile(f.home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   return f.bravo(raw_url, raw_body)
 }

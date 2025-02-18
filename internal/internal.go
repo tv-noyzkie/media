@@ -9,6 +9,7 @@ import (
    xhttp "41.neocities.org/x/http"
    "bytes"
    "encoding/base64"
+   "fmt"
    "errors"
    "io"
    "log"
@@ -19,14 +20,63 @@ import (
    "strings"
 )
 
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
+// wikipedia.org/wiki/Dynamic_Adaptive_Streaming_over_HTTP
+type Stream struct {
+   Client     WidevineClient
+   ClientId   string
+   PrivateKey string
+   key_id     []byte
+   pssh       []byte
+}
+
+func (s *Stream) Bravo(id string, raw_body, raw_url []byte) error {
+   var base url.URL
+   err := base.UnmarshalBinary(raw_url)
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(raw_body)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         return s.Download(&represent)
+      }
+   }
+   return nil
 }
 
 // must return byte slice to cover unwrapping
 type WidevineClient interface {
    License([]byte) ([]byte, error)
+}
+
+func Alfa(data []byte) error {
+   var media dash.Mpd
+   err := media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   represents := slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
 }
 
 const (
@@ -95,15 +145,6 @@ func (s *Stream) init_protect(data []byte) ([]byte, error) {
       }
    }
    return file.Append(nil)
-}
-
-// wikipedia.org/wiki/Dynamic_Adaptive_Streaming_over_HTTP
-type Stream struct {
-   Client     WidevineClient
-   ClientId   string
-   PrivateKey string
-   key_id     []byte
-   pssh       []byte
 }
 
 func (s *Stream) key() ([]byte, error) {
