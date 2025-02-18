@@ -111,9 +111,9 @@ func (c *Content) Get(id int) (*Content, bool) {
       return c, true
    }
    for _, child := range c.Children {
-      content0, ok := child.Get(id)
+      content1, ok := child.Get(id)
       if ok {
-         return content0, true
+         return content1, true
       }
    }
    return nil, false

@@ -1,18 +1,13 @@
 package main
 
 import (
-   "41.neocities.org/dash"
    "41.neocities.org/media/internal"
    "41.neocities.org/media/nbc"
    "flag"
-   "fmt"
    "io"
    "log"
-   "net/url"
-   "path/filepath"
-   "slices"
-   "41.neocities.org/x/http"
    "os"
+   "path/filepath"
 )
 
 func write_file(name string, data []byte) error {
@@ -21,8 +16,6 @@ func write_file(name string, data []byte) error {
 }
 
 func main() {
-   http.Transport{}.DefaultClient()
-   log.SetFlags(log.Ltime)
    var f flags
    err := f.New()
    if err != nil {
@@ -82,7 +75,6 @@ func (f *flags) do_print() error {
       return err
    }
    defer resp.Body.Close()
-   // Body
    data, err := io.ReadAll(resp.Body)
    if err != nil {
       return err
@@ -91,64 +83,23 @@ func (f *flags) do_print() error {
    if err != nil {
       return err
    }
-   // Request.URL
    err = write_file(
       f.home + "/mpd_url", []byte(resp.Request.URL.String()),
    )
    if err != nil {
       return err
    }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   var line bool
-   for _, represent := range represents {
-      if line {
-         fmt.Println()
-      } else {
-         line = true
-      }
-      fmt.Println(&represent)
-   }
-   return nil
+   return alfa(data)
 }
 
 func (f *flags) do_download() error {
-   // Body
-   data, err := os.ReadFile(f.home + "/mpd_body")
+   raw_url, err := os.ReadFile(f.home + "/mpd_url")
    if err != nil {
       return err
    }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
+   raw_body, err := os.ReadFile(f.home + "/mpd_body")
    if err != nil {
       return err
    }
-   // Request.URL
-   data, err = os.ReadFile(f.home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == f.representation {
-         var client nbc.Client
-         client.New()
-         f.s.Client = &client
-         return f.s.Download(&represent)
-      }
-   }
-   return nil
+   return f.bravo(raw_url, raw_body)
 }

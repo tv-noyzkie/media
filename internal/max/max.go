@@ -4,8 +4,34 @@ import (
    "41.neocities.org/media/internal"
    "41.neocities.org/media/max"
    "fmt"
+   "log"
    "os"
 )
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+func (f *flags) do_initiate() error {
+   var st max.St
+   err := st.New()
+   if err != nil {
+      return err
+   }
+   file, err := create("st.txt")
+   if err != nil {
+      return err
+   }
+   defer file.Close()
+   fmt.Fprint(file, st)
+   initiate, err := st.Initiate()
+   if err != nil {
+      return err
+   }
+   fmt.Printf("%+v\n", initiate)
+   return nil
+}
 
 func (f *flags) download() error {
    data, err := os.ReadFile(f.home + "/max.txt")
@@ -34,21 +60,6 @@ func (f *flags) download() error {
          return f.s.Download(&represent)
       }
    }
-   return nil
-}
-
-func (f *flags) do_initiate() error {
-   var st max.St
-   err := st.New()
-   if err != nil {
-      return err
-   }
-   os.WriteFile("st.txt", []byte(st.String()), os.ModePerm)
-   initiate, err := st.Initiate()
-   if err != nil {
-      return err
-   }
-   fmt.Printf("%+v\n", initiate)
    return nil
 }
 

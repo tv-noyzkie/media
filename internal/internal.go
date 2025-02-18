@@ -19,31 +19,9 @@ import (
    "strings"
 )
 
-func Mpd(client DashClient) ([]dash.Representation, error) {
-   resp, err := client.Mpd()
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   media.Set(resp.Request.URL)
-   return slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   ), nil
-}
-
-type DashClient interface {
-   Mpd() (*http.Response, error)
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
 }
 
 // must return byte slice to cover unwrapping
@@ -430,11 +408,11 @@ func (s *Stream) segment_template(
    }
    defer file.Close()
    if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      url0, err := initial.Url(represent)
+      url1, err := initial.Url(represent)
       if err != nil {
          return err
       }
-      resp, err := http.Get(url0.String())
+      resp, err := http.Get(url1.String())
       if err != nil {
          return err
       }
