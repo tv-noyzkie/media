@@ -7,7 +7,7 @@ require (
 	41.neocities.org/platform v1.6.0
 	41.neocities.org/sofia v1.7.0
 	41.neocities.org/widevine v1.6.2
-	41.neocities.org/x v1.4.5
+	41.neocities.org/x v1.4.6
 )
 
 require (
