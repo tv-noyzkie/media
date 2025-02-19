@@ -27,7 +27,7 @@ func init_protect(data []byte) ([]byte, error) {
       }
       description := moov.Trak.Mdia.Minf.Stbl.Stsd
       if sinf, ok := description.Sinf(); ok {
-         a.key_id = sinf.Schi.Tenc.S.DefaultKid[:]
+         a.key_id = sinf.Schi.Tenc.DefaultKid[:]
          // Firefox
          copy(sinf.BoxHeader.Type[:], "free")
          if sample, ok := description.SampleEntry(); ok {

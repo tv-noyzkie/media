@@ -18,6 +18,10 @@ import (
    "strings"
 )
 
+type DashClient interface {
+   Mpd() (*http.Response, error)
+}
+
 // must return byte slice to cover unwrapping
 type WidevineLicense interface {
    License([]byte) ([]byte, error)
@@ -53,10 +57,6 @@ func write_file(name string, data []byte) error {
 func create(name string) (*os.File, error) {
    log.Println("Create", name)
    return os.Create(name)
-}
-
-type DashClient interface {
-   Mpd() (*http.Response, error)
 }
 
 func segment_template(
