@@ -2,7 +2,7 @@ package internal
 
 import (
    "41.neocities.org/dash"
-   "41.neocities.org/sofia/container"
+   "41.neocities.org/sofia/file"
    "41.neocities.org/sofia/pssh"
    "41.neocities.org/sofia/sidx"
    "41.neocities.org/widevine"
@@ -20,6 +20,349 @@ import (
    "strings"
 )
 
+func get_key(pssh1 []byte) ([]byte, error) {
+   if a.key_id == nil {
+      return nil, nil
+   }
+   private_key, err := os.ReadFile(a.PrivateKey)
+   if err != nil {
+      return nil, err
+   }
+   client_id, err := os.ReadFile(a.ClientId)
+   if err != nil {
+      return nil, err
+   }
+   if pssh1 == nil {
+      var pssh2 widevine.Pssh
+      pssh2.KeyIds = [][]byte{a.key_id}
+      pssh1 = pssh2.Marshal()
+   }
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(pssh1))
+   var module widevine.Cdm
+   err = module.New(private_key, client_id, pssh1)
+   if err != nil {
+      return nil, err
+   }
+   data, err := module.RequestBody()
+   if err != nil {
+      return nil, err
+   }
+   data, err = a.Client.License(data)
+   if err != nil {
+      return nil, err
+   }
+   var body widevine.ResponseBody
+   err = body.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   block, err := module.Block(body)
+   if err != nil {
+      return nil, err
+   }
+   containers := body.Container()
+   for {
+      container, ok := containers()
+      if !ok {
+         return nil, errors.New("ResponseBody.Container")
+      }
+      if bytes.Equal(container.Id(), a.key_id) {
+         key := container.Key(block)
+         log.Println("key", base64.StdEncoding.EncodeToString(key))
+         return key, nil
+      }
+   }
+}
+
+func get_ext(represent *dash.Representation) (string, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return ".m4a", nil
+   case "text/vtt":
+      return ".vtt", nil
+   case "video/mp4":
+      return ".m4v", nil
+   }
+   return "", errors.New(*represent.MimeType)
+}
+
+func segment_base(
+   ext string,
+   pssh1 []byte,
+   represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   base := represent.SegmentBase
+   var req http.Request
+   req.Header = http.Header{}
+   // need to use Set for lower case
+   req.Header.Set("range", "bytes="+base.Initialization.Range.String())
+   req.URL = represent.BaseUrl[0]
+   resp, err := http.DefaultClient.Do(&req)
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusPartialContent {
+      return errors.New(resp.Status)
+   }
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   data, err = a.init_protect(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key()
+   if err != nil {
+      return err
+   }
+   references, err := write_sidx(&req, base.IndexRange)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(references))
+   for _, reference := range references {
+      base.IndexRange[0] = base.IndexRange[1] + 1
+      base.IndexRange[1] += uint64(reference.Size())
+      data, err = func() ([]byte, error) {
+         req.Header.Set("range", "bytes="+base.IndexRange.String())
+         resp, err := http.DefaultClient.Do(&req)
+         if err != nil {
+            return nil, err
+         }
+         defer resp.Body.Close()
+         if resp.StatusCode != http.StatusPartialContent {
+            return nil, errors.New(resp.Status)
+         }
+         return io.ReadAll(resp.Body)
+      }()
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func get(address *url.URL) ([]byte, error) {
+   resp, err := http.Get(address.String())
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func segment_list(represent *dash.Representation, ext string) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
+   if err != nil {
+      return err
+   }
+   data, err := get(initial)
+   if err != nil {
+      return err
+   }
+   data, err = a.init_protect(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key()
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(represent.SegmentList.SegmentUrl))
+   for _, segment := range represent.SegmentList.SegmentUrl {
+      media, err := segment.Media.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func write_segment(data, key []byte) ([]byte, error) {
+   if key == nil {
+      return data, nil
+   }
+   var file1 file.File
+   err := file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   track := file1.Moof.Traf
+   if senc := track.Senc; senc != nil {
+      for i, data := range file1.Mdat.Data(&track) {
+         err = senc.Sample[i].DecryptCenc(data, key)
+         if err != nil {
+            return nil, err
+         }
+      }
+   }
+   return file1.Append(nil)
+}
+
+var Forward = []struct {
+   Country string
+   Ip      string
+}{
+   {"Argentina", "186.128.0.0"},
+   {"Australia", "1.128.0.0"},
+   {"Bolivia", "179.58.0.0"},
+   {"Brazil", "179.192.0.0"},
+   {"Canada", "99.224.0.0"},
+   {"Chile", "191.112.0.0"},
+   {"Colombia", "181.128.0.0"},
+   {"Costa Rica", "201.192.0.0"},
+   {"Denmark", "2.104.0.0"},
+   {"Ecuador", "186.68.0.0"},
+   {"Egypt", "197.32.0.0"},
+   {"Germany", "53.0.0.0"},
+   {"Guatemala", "190.56.0.0"},
+   {"India", "106.192.0.0"},
+   {"Indonesia", "39.192.0.0"},
+   {"Ireland", "87.32.0.0"},
+   {"Italy", "79.0.0.0"},
+   {"Latvia", "78.84.0.0"},
+   {"Malaysia", "175.136.0.0"},
+   {"Mexico", "189.128.0.0"},
+   {"Netherlands", "145.160.0.0"},
+   {"New Zealand", "49.224.0.0"},
+   {"Norway", "88.88.0.0"},
+   {"Peru", "190.232.0.0"},
+   {"Russia", "95.24.0.0"},
+   {"South Africa", "105.0.0.0"},
+   {"South Korea", "175.192.0.0"},
+   {"Spain", "88.0.0.0"},
+   {"Sweden", "78.64.0.0"},
+   {"Taiwan", "120.96.0.0"},
+   {"United Kingdom", "25.0.0.0"},
+   {"Venezuela", "190.72.0.0"},
+}
+
+func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
+   req.Header.Set("range", "bytes="+index.String())
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return nil, err
+   }
+   var file1 file.File
+   err = file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   return file1.Sidx.Reference, nil
+}
+
+func segment_template(represent *dash.Representation, ext string) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      url1, err := initial.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(url1)
+      if err != nil {
+         return err
+      }
+      data, err = a.init_protect(data)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   key, err := a.get_key()
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
 // must return byte slice to cover unwrapping
 type WidevineClient interface {
    License([]byte) ([]byte, error)
@@ -38,18 +381,21 @@ func create(name string) (*os.File, error) {
 type DashClient interface {
    Mpd() (*http.Response, error)
 }
-
 // try to get PSSH from DASH then MP4
-func (a *Alfa) Download(client DashClient, id string) error {
+func dash_pssh(
+   client DashClient,
+   home string,
+   id string,
+) error {
    base := &url.URL{}
    var data []byte
    if id != "" {
       var err error
-      data, err = os.ReadFile(f.home + "/mpd_body")
+      data, err = os.ReadFile(home + "/mpd_body")
       if err != nil {
          return err
       }
-      data1, err := os.ReadFile(f.home + "/mpd_url")
+      data1, err := os.ReadFile(home + "/mpd_url")
       if err != nil {
          return err
       }
@@ -67,17 +413,17 @@ func (a *Alfa) Download(client DashClient, id string) error {
       if err != nil {
          return err
       }
-      err = write_file(f.home + "/mpd_body", data)
+      err = write_file(home + "/mpd_body", data)
       if err != nil {
          return err
       }
-      file, err := create(f.home + "/mpd_url")
+      file1, err := create(home + "/mpd_url")
       if err != nil {
          return err
       }
-      defer file.Close()
+      defer file1.Close()
       base = resp.Request.URL
-      fmt.Fprint(file, base)
+      fmt.Fprint(file1, base)
    }
    var media dash.Mpd
    err := media.Unmarshal(data)
@@ -147,13 +493,13 @@ const (
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
 )
 
-func (a *Alfa) init_protect(data []byte) ([]byte, error) {
-   var file container.File
-   err := file.Read(data)
+func init_protect(data []byte) ([]byte, error) {
+   var file1 file.File
+   err := file1.Read(data)
    if err != nil {
       return nil, err
    }
-   if moov, ok := file.GetMoov(); ok {
+   if moov, ok := file1.GetMoov(); ok {
       for _, pssh1 := range moov.Pssh {
          if pssh1.SystemId.String() == widevine_system_id {
             a.pssh = pssh1.Data
@@ -171,349 +517,5 @@ func (a *Alfa) init_protect(data []byte) ([]byte, error) {
          }
       }
    }
-   return file.Append(nil)
-}
-
-func (a *Alfa) get_key() ([]byte, error) {
-   if a.key_id == nil {
-      return nil, nil
-   }
-   private_key, err := os.ReadFile(a.PrivateKey)
-   if err != nil {
-      return nil, err
-   }
-   client_id, err := os.ReadFile(a.ClientId)
-   if err != nil {
-      return nil, err
-   }
-   if a.pssh == nil {
-      var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{a.key_id}
-      a.pssh = pssh.Marshal()
-   }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
-   var module widevine.Cdm
-   err = module.New(private_key, client_id, a.pssh)
-   if err != nil {
-      return nil, err
-   }
-   data, err := module.RequestBody()
-   if err != nil {
-      return nil, err
-   }
-   data, err = a.Client.License(data)
-   if err != nil {
-      return nil, err
-   }
-   var body widevine.ResponseBody
-   err = body.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   block, err := module.Block(body)
-   if err != nil {
-      return nil, err
-   }
-   containers := body.Container()
-   for {
-      container, ok := containers()
-      if !ok {
-         return nil, errors.New("ResponseBody.Container")
-      }
-      if bytes.Equal(container.Id(), a.key_id) {
-         key := container.Key(block)
-         log.Println("key", base64.StdEncoding.EncodeToString(key))
-         return key, nil
-      }
-   }
-}
-
-func get_ext(represent *dash.Representation) (string, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return ".m4a", nil
-   case "text/vtt":
-      return ".vtt", nil
-   case "video/mp4":
-      return ".m4v", nil
-   }
-   return "", errors.New(*represent.MimeType)
-}
-
-func (a *Alfa) segment_base(represent *dash.Representation, ext string) error {
-   file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   base := represent.SegmentBase
-   var req http.Request
-   req.Header = http.Header{}
-   // need to use Set for lower case
-   req.Header.Set("range", "bytes="+base.Initialization.Range.String())
-   req.URL = represent.BaseUrl[0]
-   resp, err := http.DefaultClient.Do(&req)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusPartialContent {
-      return errors.New(resp.Status)
-   }
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   data, err = a.init_protect(data)
-   if err != nil {
-      return err
-   }
-   _, err = file.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key()
-   if err != nil {
-      return err
-   }
-   references, err := write_sidx(&req, base.IndexRange)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(references))
-   for _, reference := range references {
-      base.IndexRange[0] = base.IndexRange[1] + 1
-      base.IndexRange[1] += uint64(reference.Size())
-      data, err = func() ([]byte, error) {
-         req.Header.Set("range", "bytes="+base.IndexRange.String())
-         resp, err := http.DefaultClient.Do(&req)
-         if err != nil {
-            return nil, err
-         }
-         defer resp.Body.Close()
-         if resp.StatusCode != http.StatusPartialContent {
-            return nil, errors.New(resp.Status)
-         }
-         return io.ReadAll(resp.Body)
-      }()
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func get(address *url.URL) ([]byte, error) {
-   resp, err := http.Get(address.String())
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-func (a *Alfa) segment_list(
-   represent *dash.Representation, ext string,
-) error {
-   file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
-   if err != nil {
-      return err
-   }
-   data, err := get(initial)
-   if err != nil {
-      return err
-   }
-   data, err = a.init_protect(data)
-   if err != nil {
-      return err
-   }
-   _, err = file.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key()
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
-   for _, segment := range represent.SegmentList.SegmentUrl {
-      media, err := segment.Media.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func write_segment(data, key []byte) ([]byte, error) {
-   if key == nil {
-      return data, nil
-   }
-   var file container.File
-   err := file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   track := file.Moof.Traf
-   if senc := track.Senc; senc != nil {
-      for i, data := range file.Mdat.Data(&track) {
-         err = senc.Sample[i].DecryptCenc(data, key)
-         if err != nil {
-            return nil, err
-         }
-      }
-   }
-   return file.Append(nil)
-}
-
-var Forward = []struct {
-   Country string
-   Ip      string
-}{
-   {"Argentina", "186.128.0.0"},
-   {"Australia", "1.128.0.0"},
-   {"Bolivia", "179.58.0.0"},
-   {"Brazil", "179.192.0.0"},
-   {"Canada", "99.224.0.0"},
-   {"Chile", "191.112.0.0"},
-   {"Colombia", "181.128.0.0"},
-   {"Costa Rica", "201.192.0.0"},
-   {"Denmark", "2.104.0.0"},
-   {"Ecuador", "186.68.0.0"},
-   {"Egypt", "197.32.0.0"},
-   {"Germany", "53.0.0.0"},
-   {"Guatemala", "190.56.0.0"},
-   {"India", "106.192.0.0"},
-   {"Indonesia", "39.192.0.0"},
-   {"Ireland", "87.32.0.0"},
-   {"Italy", "79.0.0.0"},
-   {"Latvia", "78.84.0.0"},
-   {"Malaysia", "175.136.0.0"},
-   {"Mexico", "189.128.0.0"},
-   {"Netherlands", "145.160.0.0"},
-   {"New Zealand", "49.224.0.0"},
-   {"Norway", "88.88.0.0"},
-   {"Peru", "190.232.0.0"},
-   {"Russia", "95.24.0.0"},
-   {"South Africa", "105.0.0.0"},
-   {"South Korea", "175.192.0.0"},
-   {"Spain", "88.0.0.0"},
-   {"Sweden", "78.64.0.0"},
-   {"Taiwan", "120.96.0.0"},
-   {"United Kingdom", "25.0.0.0"},
-   {"Venezuela", "190.72.0.0"},
-}
-
-func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
-   req.Header.Set("range", "bytes="+index.String())
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var file container.File
-   err = file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   return file.Sidx.Reference, nil
-}
-
-func (a *Alfa) segment_template(
-   represent *dash.Representation, ext string,
-) error {
-   file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      url1, err := initial.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(url1)
-      if err != nil {
-         return err
-      }
-      data, err = a.init_protect(data)
-      if err != nil {
-         return err
-      }
-      _, err = file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   key, err := a.get_key()
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
-   }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
-   for _, segment := range segments {
-      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
+   return file1.Append(nil)
 }
