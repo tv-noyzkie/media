@@ -14,8 +14,169 @@ import (
    "net/http"
    "net/url"
    "os"
+   "slices"
    "strings"
 )
+
+// must return byte slice to cover unwrapping
+type WidevineLicense interface {
+   License([]byte) ([]byte, error)
+}
+
+func get_ext(represent *dash.Representation) (string, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return ".m4a", nil
+   case "text/vtt":
+      return ".vtt", nil
+   case "video/mp4":
+      return ".m4v", nil
+   }
+   return "", errors.New(*represent.MimeType)
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
+}
+
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
+
+func write_file(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
+}
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+type DashClient interface {
+   Mpd() (*http.Response, error)
+}
+
+func segment_template(
+   client_id, private_key string, key_id, pssh1 []byte,
+   ext string,
+   license WidevineLicense,
+   represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      address, err := initial.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(address)
+      if err != nil {
+         return err
+      }
+      data, err = init_protect(data)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   key, err := get_key(client_id, private_key, key_id, pssh1, license)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func get_key(
+   client_id, private_key string, key_id, pssh []byte,
+   license WidevineLicense,
+) ([]byte, error) {
+   if key_id == nil {
+      return nil, nil
+   }
+   private_key1, err := os.ReadFile(private_key)
+   if err != nil {
+      return nil, err
+   }
+   client_id1, err := os.ReadFile(client_id)
+   if err != nil {
+      return nil, err
+   }
+   if pssh == nil {
+      var pssh1 widevine.Pssh
+      pssh1.KeyIds = [][]byte{key_id}
+      pssh = pssh1.Marshal()
+   }
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(pssh))
+   var module widevine.Cdm
+   err = module.New(private_key1, client_id1, pssh)
+   if err != nil {
+      return nil, err
+   }
+   data, err := module.RequestBody()
+   if err != nil {
+      return nil, err
+   }
+   data, err = license.License(data)
+   if err != nil {
+      return nil, err
+   }
+   var body widevine.ResponseBody
+   err = body.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   block, err := module.Block(body)
+   if err != nil {
+      return nil, err
+   }
+   containers := body.Container()
+   for {
+      container, ok := containers()
+      if !ok {
+         return nil, errors.New("ResponseBody.Container")
+      }
+      if bytes.Equal(container.Id(), key_id) {
+         key := container.Key(block)
+         log.Println("key", base64.StdEncoding.EncodeToString(key))
+         return key, nil
+      }
+   }
+}
 
 func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
    req.Header.Set("range", "bytes="+index.String())
@@ -149,63 +310,6 @@ func segment_list(
       }
    }
    return nil
-}
-
-func get_key(
-   client_id, private_key string, key_id, pssh []byte,
-   license WidevineLicense,
-) ([]byte, error) {
-   if key_id == nil {
-      return nil, nil
-   }
-   private_key1, err := os.ReadFile(private_key)
-   if err != nil {
-      return nil, err
-   }
-   client_id1, err := os.ReadFile(client_id)
-   if err != nil {
-      return nil, err
-   }
-   if pssh == nil {
-      var pssh1 widevine.Pssh
-      pssh1.KeyIds = [][]byte{key_id}
-      pssh = pssh1.Marshal()
-   }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(pssh))
-   var module widevine.Cdm
-   err = module.New(private_key1, client_id1, pssh)
-   if err != nil {
-      return nil, err
-   }
-   data, err := module.RequestBody()
-   if err != nil {
-      return nil, err
-   }
-   data, err = license.License(data)
-   if err != nil {
-      return nil, err
-   }
-   var body widevine.ResponseBody
-   err = body.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   block, err := module.Block(body)
-   if err != nil {
-      return nil, err
-   }
-   containers := body.Container()
-   for {
-      container, ok := containers()
-      if !ok {
-         return nil, errors.New("ResponseBody.Container")
-      }
-      if bytes.Equal(container.Id(), key_id) {
-         key := container.Key(block)
-         log.Println("key", base64.StdEncoding.EncodeToString(key))
-         return key, nil
-      }
-   }
 }
 
 func get(address *url.URL) ([]byte, error) {
