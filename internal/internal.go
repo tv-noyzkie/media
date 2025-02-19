@@ -20,20 +20,67 @@ import (
    "strings"
 )
 
-func WriteFile(name string, data []byte) error {
+// must return byte slice to cover unwrapping
+type WidevineClient interface {
+   License([]byte) ([]byte, error)
+}
+
+func write_file(name string, data []byte) error {
    log.Println("WriteFile", name)
    return os.WriteFile(name, data, os.ModePerm)
 }
 
-func Create(name string) (*os.File, error) {
+func create(name string) (*os.File, error) {
    log.Println("Create", name)
    return os.Create(name)
 }
 
+type DashClient interface {
+   Mpd() (*http.Response, error)
+}
+
 // try to get PSSH from DASH then MP4
-func (s *Stream) Download(base *url.URL, body []byte, id string) error {
+func (a *Alfa) Download(client DashClient, id string) error {
+   base := &url.URL{}
+   var data []byte
+   if id != "" {
+      var err error
+      data, err = os.ReadFile(f.home + "/mpd_body")
+      if err != nil {
+         return err
+      }
+      data1, err := os.ReadFile(f.home + "/mpd_url")
+      if err != nil {
+         return err
+      }
+      err = base.UnmarshalBinary(data1)
+      if err != nil {
+         return err
+      }
+   } else {
+      resp, err := client.Mpd()
+      if err != nil {
+         return err
+      }
+      defer resp.Body.Close()
+      data, err = io.ReadAll(resp.Body)
+      if err != nil {
+         return err
+      }
+      err = write_file(f.home + "/mpd_body", data)
+      if err != nil {
+         return err
+      }
+      file, err := create(f.home + "/mpd_url")
+      if err != nil {
+         return err
+      }
+      defer file.Close()
+      base = resp.Request.URL
+      fmt.Fprint(file, base)
+   }
    var media dash.Mpd
-   err := media.Unmarshal(body)
+   err := media.Unmarshal(data)
    if err != nil {
       return err
    }
@@ -71,7 +118,7 @@ func (s *Stream) Download(base *url.URL, body []byte, id string) error {
             if err != nil {
                return err
             }
-            s.pssh = box.Data
+            a.pssh = box.Data
             break
          }
          ext, err := get_ext(&represent)
@@ -79,29 +126,15 @@ func (s *Stream) Download(base *url.URL, body []byte, id string) error {
             return err
          }
          if represent.SegmentBase != nil {
-            return s.segment_base(&represent, ext)
+            return a.segment_base(&represent, ext)
          }
          if represent.SegmentList != nil {
-            return s.segment_list(&represent, ext)
+            return a.segment_list(&represent, ext)
          }
-         return s.segment_template(&represent, ext)
+         return a.segment_template(&represent, ext)
       }
    }
    return nil
-}
-
-// wikipedia.org/wiki/Dynamic_Adaptive_Streaming_over_HTTP
-type Stream struct {
-   Client     WidevineClient
-   ClientId   string
-   PrivateKey string
-   key_id     []byte
-   pssh       []byte
-}
-
-// must return byte slice to cover unwrapping
-type WidevineClient interface {
-   License([]byte) ([]byte, error)
 }
 
 func init() {
@@ -114,7 +147,7 @@ const (
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
 )
 
-func (s *Stream) init_protect(data []byte) ([]byte, error) {
+func (a *Alfa) init_protect(data []byte) ([]byte, error) {
    var file container.File
    err := file.Read(data)
    if err != nil {
@@ -123,13 +156,13 @@ func (s *Stream) init_protect(data []byte) ([]byte, error) {
    if moov, ok := file.GetMoov(); ok {
       for _, pssh1 := range moov.Pssh {
          if pssh1.SystemId.String() == widevine_system_id {
-            s.pssh = pssh1.Data
+            a.pssh = pssh1.Data
          }
          copy(pssh1.BoxHeader.Type[:], "free") // Firefox
       }
       description := moov.Trak.Mdia.Minf.Stbl.Stsd
       if sinf, ok := description.Sinf(); ok {
-         s.key_id = sinf.Schi.Tenc.S.DefaultKid[:]
+         a.key_id = sinf.Schi.Tenc.S.DefaultKid[:]
          // Firefox
          copy(sinf.BoxHeader.Type[:], "free")
          if sample, ok := description.SampleEntry(); ok {
@@ -141,26 +174,26 @@ func (s *Stream) init_protect(data []byte) ([]byte, error) {
    return file.Append(nil)
 }
 
-func (s *Stream) key() ([]byte, error) {
-   if s.key_id == nil {
+func (a *Alfa) get_key() ([]byte, error) {
+   if a.key_id == nil {
       return nil, nil
    }
-   private_key, err := os.ReadFile(s.PrivateKey)
+   private_key, err := os.ReadFile(a.PrivateKey)
    if err != nil {
       return nil, err
    }
-   client_id, err := os.ReadFile(s.ClientId)
+   client_id, err := os.ReadFile(a.ClientId)
    if err != nil {
       return nil, err
    }
-   if s.pssh == nil {
+   if a.pssh == nil {
       var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{s.key_id}
-      s.pssh = pssh.Marshal()
+      pssh.KeyIds = [][]byte{a.key_id}
+      a.pssh = pssh.Marshal()
    }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(s.pssh))
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
    var module widevine.Cdm
-   err = module.New(private_key, client_id, s.pssh)
+   err = module.New(private_key, client_id, a.pssh)
    if err != nil {
       return nil, err
    }
@@ -168,7 +201,7 @@ func (s *Stream) key() ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   data, err = s.Client.License(data)
+   data, err = a.Client.License(data)
    if err != nil {
       return nil, err
    }
@@ -187,26 +220,12 @@ func (s *Stream) key() ([]byte, error) {
       if !ok {
          return nil, errors.New("ResponseBody.Container")
       }
-      if bytes.Equal(container.Id(), s.key_id) {
+      if bytes.Equal(container.Id(), a.key_id) {
          key := container.Key(block)
          log.Println("key", base64.StdEncoding.EncodeToString(key))
          return key, nil
       }
    }
-}
-
-func get(address *url.URL) ([]byte, error) {
-   resp, err := http.Get(address.String())
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
 }
 
 func get_ext(represent *dash.Representation) (string, error) {
@@ -221,8 +240,8 @@ func get_ext(represent *dash.Representation) (string, error) {
    return "", errors.New(*represent.MimeType)
 }
 
-func (s *Stream) segment_base(represent *dash.Representation, ext string) error {
-   file, err := Create(ext)
+func (a *Alfa) segment_base(represent *dash.Representation, ext string) error {
+   file, err := create(ext)
    if err != nil {
       return err
    }
@@ -245,7 +264,7 @@ func (s *Stream) segment_base(represent *dash.Representation, ext string) error 
    if err != nil {
       return err
    }
-   data, err = s.init_protect(data)
+   data, err = a.init_protect(data)
    if err != nil {
       return err
    }
@@ -253,7 +272,7 @@ func (s *Stream) segment_base(represent *dash.Representation, ext string) error 
    if err != nil {
       return err
    }
-   key, err := s.key()
+   key, err := a.get_key()
    if err != nil {
       return err
    }
@@ -295,10 +314,24 @@ func (s *Stream) segment_base(represent *dash.Representation, ext string) error 
    return nil
 }
 
-func (s *Stream) segment_list(
+func get(address *url.URL) ([]byte, error) {
+   resp, err := http.Get(address.String())
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func (a *Alfa) segment_list(
    represent *dash.Representation, ext string,
 ) error {
-   file, err := Create(ext)
+   file, err := create(ext)
    if err != nil {
       return err
    }
@@ -307,19 +340,11 @@ func (s *Stream) segment_list(
    if err != nil {
       return err
    }
-   resp, err := http.Get(initial.String())
+   data, err := get(initial)
    if err != nil {
       return err
    }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      return errors.New(resp.Status)
-   }
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   data, err = s.init_protect(data)
+   data, err = a.init_protect(data)
    if err != nil {
       return err
    }
@@ -327,7 +352,7 @@ func (s *Stream) segment_list(
    if err != nil {
       return err
    }
-   key, err := s.key()
+   key, err := a.get_key()
    if err != nil {
       return err
    }
@@ -434,10 +459,10 @@ func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
    return file.Sidx.Reference, nil
 }
 
-func (s *Stream) segment_template(
+func (a *Alfa) segment_template(
    represent *dash.Representation, ext string,
 ) error {
-   file, err := Create(ext)
+   file, err := create(ext)
    if err != nil {
       return err
    }
@@ -447,19 +472,11 @@ func (s *Stream) segment_template(
       if err != nil {
          return err
       }
-      resp, err := http.Get(url1.String())
+      data, err := get(url1)
       if err != nil {
          return err
       }
-      defer resp.Body.Close()
-      if resp.StatusCode != http.StatusOK {
-         return errors.New(resp.Status)
-      }
-      data, err := io.ReadAll(resp.Body)
-      if err != nil {
-         return err
-      }
-      data, err = s.init_protect(data)
+      data, err = a.init_protect(data)
       if err != nil {
          return err
       }
@@ -468,7 +485,7 @@ func (s *Stream) segment_template(
          return err
       }
    }
-   key, err := s.key()
+   key, err := a.get_key()
    if err != nil {
       return err
    }

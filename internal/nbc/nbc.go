@@ -19,6 +19,7 @@ func (f *flags) do_print() error {
    if err != nil {
       return err
    }
+   //////////////////////////////////////////////////////////////////////////////
    resp, err := vod.Mpd()
    if err != nil {
       return err
@@ -36,9 +37,14 @@ func (f *flags) do_print() error {
    defer file.Close()
    fmt.Fprint(file, resp.Request.URL)
    return f.s.Download(resp.Request.URL, body, "")
+   //////////////////////////////////////////////////////////////////////////////
 }
 
 func (f *flags) do_download() error {
+   var client nbc.Client
+   client.New()
+   f.s.Client = &client
+   //////////////////////////////////////////////////////////////////////////////
    data, err := os.ReadFile(f.home + "/mpd_url")
    if err != nil {
       return err
@@ -52,8 +58,6 @@ func (f *flags) do_download() error {
    if err != nil {
       return err
    }
-   var client nbc.Client
-   client.New()
-   f.s.Client = &client
    return f.s.Download(&base, body, f.representation)
+   //////////////////////////////////////////////////////////////////////////////
 }
