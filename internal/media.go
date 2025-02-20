@@ -2,7 +2,6 @@ package internal
 
 import (
    "41.neocities.org/dash"
-   "41.neocities.org/sofia/file"
    "41.neocities.org/sofia/pssh"
    "encoding/base64"
    "fmt"
@@ -12,39 +11,8 @@ import (
    "slices"
 )
 
-func init_protect(data []byte) ([]byte, error) {
-   var file1 file.File
-   err := file1.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   if moov, ok := file1.GetMoov(); ok {
-      for _, pssh1 := range moov.Pssh {
-         if pssh1.SystemId.String() == widevine_system_id {
-            a.pssh = pssh1.Data
-         }
-         copy(pssh1.BoxHeader.Type[:], "free") // Firefox
-      }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         a.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
-      }
-   }
-   return file1.Append(nil)
-}
-
 // try to get PSSH from DASH then MP4
-func dash_pssh(
-   client DashClient,
-   home string,
-   id string,
-) error {
+func (a *alfa) dash_pssh(client DashClient, home string, id string) error {
    base := &url.URL{}
    var data []byte
    if id != "" {
@@ -135,7 +103,7 @@ func dash_pssh(
          if represent.SegmentList != nil {
             return a.segment_list(&represent, ext)
          }
-         return a.segment_template(&represent, ext)
+         return a.segment_template(ext, &represent)
       }
    }
    return nil

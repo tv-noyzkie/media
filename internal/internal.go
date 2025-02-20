@@ -18,114 +18,10 @@ import (
    "strings"
 )
 
-type DashClient interface {
-   Mpd() (*http.Response, error)
-}
-
-// must return byte slice to cover unwrapping
-type WidevineLicense interface {
-   License([]byte) ([]byte, error)
-}
-
-func get_ext(represent *dash.Representation) (string, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return ".m4a", nil
-   case "text/vtt":
-      return ".vtt", nil
-   case "video/mp4":
-      return ".m4v", nil
-   }
-   return "", errors.New(*represent.MimeType)
-}
-
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
-}
-
-const (
-   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
-   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-)
-
-func write_file(name string, data []byte) error {
-   log.Println("WriteFile", name)
-   return os.WriteFile(name, data, os.ModePerm)
-}
-
-func create(name string) (*os.File, error) {
-   log.Println("Create", name)
-   return os.Create(name)
-}
-
-func segment_template(
-   client_id, private_key string, key_id, pssh1 []byte,
-   ext string,
-   license WidevineLicense,
-   represent *dash.Representation,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      address, err := initial.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(address)
-      if err != nil {
-         return err
-      }
-      data, err = init_protect(data)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   key, err := get_key(client_id, private_key, key_id, pssh1, license)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
-   }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
-   for _, segment := range segments {
-      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func get_key(
-   client_id, private_key string, key_id, pssh []byte,
-   license WidevineLicense,
+func (a *alfa) get_key(
+   client_id, private_key string, license WidevineLicense,
 ) ([]byte, error) {
-   if key_id == nil {
+   if a.key_id == nil {
       return nil, nil
    }
    private_key1, err := os.ReadFile(private_key)
@@ -136,14 +32,14 @@ func get_key(
    if err != nil {
       return nil, err
    }
-   if pssh == nil {
-      var pssh1 widevine.Pssh
-      pssh1.KeyIds = [][]byte{key_id}
-      pssh = pssh1.Marshal()
+   if a.pssh == nil {
+      var pssh widevine.Pssh
+      pssh.KeyIds = [][]byte{a.key_id}
+      a.pssh = pssh.Marshal()
    }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(pssh))
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
    var module widevine.Cdm
-   err = module.New(private_key1, client_id1, pssh)
+   err = module.New(private_key1, client_id1, a.pssh)
    if err != nil {
       return nil, err
    }
@@ -170,7 +66,7 @@ func get_key(
       if !ok {
          return nil, errors.New("ResponseBody.Container")
       }
-      if bytes.Equal(container.Id(), key_id) {
+      if bytes.Equal(container.Id(), a.key_id) {
          key := container.Key(block)
          log.Println("key", base64.StdEncoding.EncodeToString(key))
          return key, nil
@@ -256,8 +152,8 @@ func write_segment(data, key []byte) ([]byte, error) {
    return file1.Append(nil)
 }
 
-func segment_list(
-   client_id, private_key string, key_id, pssh1 []byte,
+func (a *alfa) segment_list(
+   client_id, private_key string,
    ext string,
    license WidevineLicense,
    represent *dash.Representation,
@@ -275,7 +171,7 @@ func segment_list(
    if err != nil {
       return err
    }
-   data, err = init_protect(data)
+   data, err = new(alfa).initialization(data)
    if err != nil {
       return err
    }
@@ -283,7 +179,7 @@ func segment_list(
    if err != nil {
       return err
    }
-   key, err := get_key(client_id, private_key, key_id, pssh1, license)
+   key, err := a.get_key(client_id, private_key, license)
    if err != nil {
       return err
    }
@@ -326,8 +222,8 @@ func get(address *url.URL) ([]byte, error) {
    return io.ReadAll(resp.Body)
 }
 
-func segment_base(
-   client_id, private_key string, key_id, pssh []byte,
+func (a *alfa) segment_base(
+   client_id, private_key string,
    ext string,
    license WidevineLicense,
    represent *dash.Representation,
@@ -355,7 +251,7 @@ func segment_base(
    if err != nil {
       return err
    }
-   data, err = init_protect(data)
+   data, err = new(alfa).initialization(data)
    if err != nil {
       return err
    }
@@ -363,7 +259,7 @@ func segment_base(
    if err != nil {
       return err
    }
-   key, err := get_key(client_id, private_key, key_id, pssh, license)
+   key, err := a.get_key(client_id, private_key, license)
    if err != nil {
       return err
    }
@@ -389,6 +285,140 @@ func segment_base(
          }
          return io.ReadAll(resp.Body)
       }()
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (a *alfa) initialization(data []byte) ([]byte, error) {
+   var file1 file.File
+   err := file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   if moov, ok := file1.GetMoov(); ok {
+      for _, pssh := range moov.Pssh {
+         if pssh.SystemId.String() == widevine_system_id {
+            a.pssh = pssh.Data
+         }
+         copy(pssh.BoxHeader.Type[:], "free") // Firefox
+      }
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         a.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
+      }
+   }
+   return file1.Append(nil)
+}
+
+type DashClient interface {
+   Mpd() (*http.Response, error)
+}
+
+// must return byte slice to cover unwrapping
+type WidevineLicense interface {
+   License([]byte) ([]byte, error)
+}
+
+func get_ext(represent *dash.Representation) (string, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return ".m4a", nil
+   case "text/vtt":
+      return ".vtt", nil
+   case "video/mp4":
+      return ".m4v", nil
+   }
+   return "", errors.New(*represent.MimeType)
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
+}
+
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
+
+func write_file(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
+}
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+type alfa struct {
+   key_id []byte
+   pssh []byte
+}
+
+func (a *alfa) segment_template(
+   client_id, private_key string,
+   ext string,
+   license WidevineLicense,
+   represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      address, err := initial.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(address)
+      if err != nil {
+         return err
+      }
+      data, err = new(alfa).initialization(data)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   key, err := a.get_key(client_id, private_key, license)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
       if err != nil {
          return err
       }
