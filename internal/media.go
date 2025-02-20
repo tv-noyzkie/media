@@ -12,7 +12,11 @@ import (
 )
 
 // try to get PSSH from DASH then MP4
-func (a *alfa) dash_pssh(client DashClient, home string, id string) error {
+func (a *alfa) dash_pssh(
+   client_id, private_key string,
+   d_client DashClient, w_client WidevineClient,
+   home, id string,
+) error {
    base := &url.URL{}
    var data []byte
    if id != "" {
@@ -30,7 +34,7 @@ func (a *alfa) dash_pssh(client DashClient, home string, id string) error {
          return err
       }
    } else {
-      resp, err := client.Mpd()
+      resp, err := d_client.Dash()
       if err != nil {
          return err
       }
@@ -98,12 +102,25 @@ func (a *alfa) dash_pssh(client DashClient, home string, id string) error {
             return err
          }
          if represent.SegmentBase != nil {
-            return a.segment_base(&represent, ext)
+            return a.segment_base(
+               client_id, private_key,
+               ext,
+               &represent,
+               w_client,
+            )
          }
          if represent.SegmentList != nil {
-            return a.segment_list(&represent, ext)
+            return a.segment_list(
+               client_id, private_key,
+               ext,
+               &represent,
+               w_client,
+            )
          }
-         return a.segment_template(ext, &represent)
+         return a.segment_template(
+            ext,
+            &represent,
+         )
       }
    }
    return nil

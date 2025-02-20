@@ -18,81 +18,19 @@ import (
    "strings"
 )
 
-func (a *alfa) segment_list(
-   client_id, private_key string,
-   ext string,
-   license WidevineLicense,
-   represent *dash.Representation,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
-   if err != nil {
-      return err
-   }
-   data, err := get(initial)
-   if err != nil {
-      return err
-   }
-   data, err = new(alfa).initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = file1.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key(client_id, private_key, license)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
-   for _, segment := range represent.SegmentList.SegmentUrl {
-      media, err := segment.Media.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
+type DashClient interface {
+   Dash() (*http.Response, error)
 }
 
-func get(address *url.URL) ([]byte, error) {
-   resp, err := http.Get(address.String())
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
+type WidevineClient interface {
+   Widevine([]byte) ([]byte, error)
 }
 
 func (a *alfa) segment_base(
    client_id, private_key string,
    ext string,
-   license WidevineLicense,
    represent *dash.Representation,
+   w_client WidevineClient,
 ) error {
    file1, err := create(ext)
    if err != nil {
@@ -125,7 +63,7 @@ func (a *alfa) segment_base(
    if err != nil {
       return err
    }
-   key, err := a.get_key(client_id, private_key, license)
+   key, err := a.get_key(client_id, private_key, w_client)
    if err != nil {
       return err
    }
@@ -194,15 +132,6 @@ func (a *alfa) initialization(data []byte) ([]byte, error) {
    return file1.Append(nil)
 }
 
-type DashClient interface {
-   Mpd() (*http.Response, error)
-}
-
-// must return byte slice to cover unwrapping
-type WidevineLicense interface {
-   License([]byte) ([]byte, error)
-}
-
 func get_ext(represent *dash.Representation) (string, error) {
    switch *represent.MimeType {
    case "audio/mp4":
@@ -242,7 +171,7 @@ type alfa struct {
 func (a *alfa) segment_template(
    client_id, private_key string,
    ext string,
-   license WidevineLicense,
+   w_client WidevineClient,
    represent *dash.Representation,
 ) error {
    file1, err := create(ext)
@@ -268,7 +197,7 @@ func (a *alfa) segment_template(
          return err
       }
    }
-   key, err := a.get_key(client_id, private_key, license)
+   key, err := a.get_key(client_id, private_key, w_client)
    if err != nil {
       return err
    }
@@ -300,8 +229,9 @@ func (a *alfa) segment_template(
    }
    return nil
 }
+
 func (a *alfa) get_key(
-   client_id, private_key string, license WidevineLicense,
+   client_id, private_key string, w_client WidevineClient,
 ) ([]byte, error) {
    if a.key_id == nil {
       return nil, nil
@@ -329,7 +259,7 @@ func (a *alfa) get_key(
    if err != nil {
       return nil, err
    }
-   data, err = license.License(data)
+   data, err = w_client.Widevine(data)
    if err != nil {
       return nil, err
    }
@@ -432,4 +362,73 @@ func write_segment(data, key []byte) ([]byte, error) {
       }
    }
    return file1.Append(nil)
+}
+func (a *alfa) segment_list(
+   client_id, private_key string,
+   ext string,
+   represent *dash.Representation,
+   w_client WidevineClient,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
+   if err != nil {
+      return err
+   }
+   data, err := get(initial)
+   if err != nil {
+      return err
+   }
+   data, err = new(alfa).initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key(client_id, private_key, w_client)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(represent.SegmentList.SegmentUrl))
+   for _, segment := range represent.SegmentList.SegmentUrl {
+      media, err := segment.Media.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func get(address *url.URL) ([]byte, error) {
+   resp, err := http.Get(address.String())
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
 }
