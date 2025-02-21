@@ -20,6 +20,162 @@ import (
    "strings"
 )
 
+func get(address *url.URL) ([]byte, error) {
+   resp, err := http.Get(address.String())
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func (a *alfa) initialization(data []byte) ([]byte, error) {
+   var file1 file.File
+   err := file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   if moov, ok := file1.GetMoov(); ok {
+      for _, pssh := range moov.Pssh {
+         if pssh.SystemId.String() == widevine_system_id {
+            a.pssh = pssh.Data
+         }
+         copy(pssh.BoxHeader.Type[:], "free") // Firefox
+      }
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         a.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
+      }
+   }
+   return file1.Append(nil)
+}
+
+func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
+   req.Header.Set("range", "bytes="+index.String())
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return nil, err
+   }
+   var file1 file.File
+   err = file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   return file1.Sidx.Reference, nil
+}
+
+func get_ext(represent *dash.Representation) (string, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return ".m4a", nil
+   case "text/vtt":
+      return ".vtt", nil
+   case "video/mp4":
+      return ".m4v", nil
+   }
+   return "", errors.New(*represent.MimeType)
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
+}
+
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
+
+func write_file(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
+}
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+type alfa struct {
+   key_id []byte
+   pssh   []byte
+}
+
+var Forward = []struct {
+   Country string
+   Ip      string
+}{
+   {"Argentina", "186.128.0.0"},
+   {"Australia", "1.128.0.0"},
+   {"Bolivia", "179.58.0.0"},
+   {"Brazil", "179.192.0.0"},
+   {"Canada", "99.224.0.0"},
+   {"Chile", "191.112.0.0"},
+   {"Colombia", "181.128.0.0"},
+   {"Costa Rica", "201.192.0.0"},
+   {"Denmark", "2.104.0.0"},
+   {"Ecuador", "186.68.0.0"},
+   {"Egypt", "197.32.0.0"},
+   {"Germany", "53.0.0.0"},
+   {"Guatemala", "190.56.0.0"},
+   {"India", "106.192.0.0"},
+   {"Indonesia", "39.192.0.0"},
+   {"Ireland", "87.32.0.0"},
+   {"Italy", "79.0.0.0"},
+   {"Latvia", "78.84.0.0"},
+   {"Malaysia", "175.136.0.0"},
+   {"Mexico", "189.128.0.0"},
+   {"Netherlands", "145.160.0.0"},
+   {"New Zealand", "49.224.0.0"},
+   {"Norway", "88.88.0.0"},
+   {"Peru", "190.232.0.0"},
+   {"Russia", "95.24.0.0"},
+   {"South Africa", "105.0.0.0"},
+   {"South Korea", "175.192.0.0"},
+   {"Spain", "88.0.0.0"},
+   {"Sweden", "78.64.0.0"},
+   {"Taiwan", "120.96.0.0"},
+   {"United Kingdom", "25.0.0.0"},
+   {"Venezuela", "190.72.0.0"},
+}
+
+func write_segment(data, key []byte) ([]byte, error) {
+   if key == nil {
+      return data, nil
+   }
+   var file1 file.File
+   err := file1.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   track := file1.Moof.Traf
+   if senc := track.Senc; senc != nil {
+      for i, data := range file1.Mdat.Data(&track) {
+         err = senc.Sample[i].DecryptCenc(data, key)
+         if err != nil {
+            return nil, err
+         }
+      }
+   }
+   return file1.Append(nil)
+}
+
 // try to get PSSH from DASH then MP4
 func (a *alfa) dash_pssh(
    client_id, private_key string,
@@ -145,6 +301,64 @@ type WidevineClient interface {
    Widevine([]byte) ([]byte, error)
 }
 
+///
+
+func (a *alfa) get_key(
+   client_id, private_key string, w_client WidevineClient,
+) ([]byte, error) {
+   if a.key_id == nil {
+      return nil, nil
+   }
+   private_key1, err := os.ReadFile(private_key)
+   if err != nil {
+      return nil, err
+   }
+   client_id1, err := os.ReadFile(client_id)
+   if err != nil {
+      return nil, err
+   }
+   if a.pssh == nil {
+      var pssh widevine.Pssh
+      pssh.KeyIds = [][]byte{a.key_id}
+      a.pssh = pssh.Marshal()
+   }
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
+   var module widevine.Cdm
+   err = module.New(private_key1, client_id1, a.pssh)
+   if err != nil {
+      return nil, err
+   }
+   data, err := module.RequestBody()
+   if err != nil {
+      return nil, err
+   }
+   data, err = w_client.Widevine(data)
+   if err != nil {
+      return nil, err
+   }
+   var body widevine.ResponseBody
+   err = body.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   block, err := module.Block(body)
+   if err != nil {
+      return nil, err
+   }
+   containers := body.Container()
+   for {
+      container, ok := containers()
+      if !ok {
+         return nil, errors.New("ResponseBody.Container")
+      }
+      if bytes.Equal(container.Id(), a.key_id) {
+         key := container.Key(block)
+         log.Println("key", base64.StdEncoding.EncodeToString(key))
+         return key, nil
+      }
+   }
+}
+
 func (a *alfa) segment_template(
    client_id, private_key string,
    ext string,
@@ -207,139 +421,6 @@ func (a *alfa) segment_template(
    return nil
 }
 
-func (a *alfa) get_key(
-   client_id, private_key string, w_client WidevineClient,
-) ([]byte, error) {
-   if a.key_id == nil {
-      return nil, nil
-   }
-   private_key1, err := os.ReadFile(private_key)
-   if err != nil {
-      return nil, err
-   }
-   client_id1, err := os.ReadFile(client_id)
-   if err != nil {
-      return nil, err
-   }
-   if a.pssh == nil {
-      var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{a.key_id}
-      a.pssh = pssh.Marshal()
-   }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
-   var module widevine.Cdm
-   err = module.New(private_key1, client_id1, a.pssh)
-   if err != nil {
-      return nil, err
-   }
-   data, err := module.RequestBody()
-   if err != nil {
-      return nil, err
-   }
-   data, err = w_client.Widevine(data)
-   if err != nil {
-      return nil, err
-   }
-   var body widevine.ResponseBody
-   err = body.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   block, err := module.Block(body)
-   if err != nil {
-      return nil, err
-   }
-   containers := body.Container()
-   for {
-      container, ok := containers()
-      if !ok {
-         return nil, errors.New("ResponseBody.Container")
-      }
-      if bytes.Equal(container.Id(), a.key_id) {
-         key := container.Key(block)
-         log.Println("key", base64.StdEncoding.EncodeToString(key))
-         return key, nil
-      }
-   }
-}
-
-func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
-   req.Header.Set("range", "bytes="+index.String())
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var file1 file.File
-   err = file1.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   return file1.Sidx.Reference, nil
-}
-
-var Forward = []struct {
-   Country string
-   Ip      string
-}{
-   {"Argentina", "186.128.0.0"},
-   {"Australia", "1.128.0.0"},
-   {"Bolivia", "179.58.0.0"},
-   {"Brazil", "179.192.0.0"},
-   {"Canada", "99.224.0.0"},
-   {"Chile", "191.112.0.0"},
-   {"Colombia", "181.128.0.0"},
-   {"Costa Rica", "201.192.0.0"},
-   {"Denmark", "2.104.0.0"},
-   {"Ecuador", "186.68.0.0"},
-   {"Egypt", "197.32.0.0"},
-   {"Germany", "53.0.0.0"},
-   {"Guatemala", "190.56.0.0"},
-   {"India", "106.192.0.0"},
-   {"Indonesia", "39.192.0.0"},
-   {"Ireland", "87.32.0.0"},
-   {"Italy", "79.0.0.0"},
-   {"Latvia", "78.84.0.0"},
-   {"Malaysia", "175.136.0.0"},
-   {"Mexico", "189.128.0.0"},
-   {"Netherlands", "145.160.0.0"},
-   {"New Zealand", "49.224.0.0"},
-   {"Norway", "88.88.0.0"},
-   {"Peru", "190.232.0.0"},
-   {"Russia", "95.24.0.0"},
-   {"South Africa", "105.0.0.0"},
-   {"South Korea", "175.192.0.0"},
-   {"Spain", "88.0.0.0"},
-   {"Sweden", "78.64.0.0"},
-   {"Taiwan", "120.96.0.0"},
-   {"United Kingdom", "25.0.0.0"},
-   {"Venezuela", "190.72.0.0"},
-}
-
-func write_segment(data, key []byte) ([]byte, error) {
-   if key == nil {
-      return data, nil
-   }
-   var file1 file.File
-   err := file1.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   track := file1.Moof.Traf
-   if senc := track.Senc; senc != nil {
-      for i, data := range file1.Mdat.Data(&track) {
-         err = senc.Sample[i].DecryptCenc(data, key)
-         if err != nil {
-            return nil, err
-         }
-      }
-   }
-   return file1.Append(nil)
-}
 func (a *alfa) segment_list(
    client_id, private_key string,
    ext string,
@@ -396,19 +477,6 @@ func (a *alfa) segment_list(
    return nil
 }
 
-func get(address *url.URL) ([]byte, error) {
-   resp, err := http.Get(address.String())
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
 func (a *alfa) segment_base(
    client_id, private_key string,
    ext string,
@@ -486,68 +554,4 @@ func (a *alfa) segment_base(
       }
    }
    return nil
-}
-
-func (a *alfa) initialization(data []byte) ([]byte, error) {
-   var file1 file.File
-   err := file1.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   if moov, ok := file1.GetMoov(); ok {
-      for _, pssh := range moov.Pssh {
-         if pssh.SystemId.String() == widevine_system_id {
-            a.pssh = pssh.Data
-         }
-         copy(pssh.BoxHeader.Type[:], "free") // Firefox
-      }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         a.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
-      }
-   }
-   return file1.Append(nil)
-}
-
-func get_ext(represent *dash.Representation) (string, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return ".m4a", nil
-   case "text/vtt":
-      return ".vtt", nil
-   case "video/mp4":
-      return ".m4v", nil
-   }
-   return "", errors.New(*represent.MimeType)
-}
-
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
-}
-
-const (
-   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
-   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-)
-
-func write_file(name string, data []byte) error {
-   log.Println("WriteFile", name)
-   return os.WriteFile(name, data, os.ModePerm)
-}
-
-func create(name string) (*os.File, error) {
-   log.Println("Create", name)
-   return os.Create(name)
-}
-
-type alfa struct {
-   key_id []byte
-   pssh   []byte
 }
