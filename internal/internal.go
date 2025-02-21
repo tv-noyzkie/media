@@ -20,6 +20,380 @@ import (
    "strings"
 )
 
+// try to get PSSH from DASH then MP4
+func (a *alfa) dash_pssh(
+   b *bravo,
+   client DashClient,
+   home, id string,
+) error {
+   base := &url.URL{}
+   var data []byte
+   if id != "" {
+      var err error
+      data, err = os.ReadFile(home + "/mpd_body")
+      if err != nil {
+         return err
+      }
+      data1, err := os.ReadFile(home + "/mpd_url")
+      if err != nil {
+         return err
+      }
+      err = base.UnmarshalBinary(data1)
+      if err != nil {
+         return err
+      }
+   } else {
+      resp, err := client.Dash()
+      if err != nil {
+         return err
+      }
+      defer resp.Body.Close()
+      data, err = io.ReadAll(resp.Body)
+      if err != nil {
+         return err
+      }
+      err = write_file(home+"/mpd_body", data)
+      if err != nil {
+         return err
+      }
+      file1, err := create(home + "/mpd_url")
+      if err != nil {
+         return err
+      }
+      defer file1.Close()
+      base = resp.Request.URL
+      fmt.Fprint(file1, base)
+   }
+   var media dash.Mpd
+   err := media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   media.Set(base)
+   represents := slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      switch id {
+      case "":
+         if i >= 1 {
+            fmt.Println()
+         }
+         fmt.Println(&represent)
+      case represent.Id:
+         for _, protect := range represent.ContentProtection {
+            if protect.SchemeIdUri != widevine_urn {
+               continue
+            }
+            if protect.Pssh == "" {
+               continue
+            }
+            data, err := base64.StdEncoding.DecodeString(protect.Pssh)
+            if err != nil {
+               return err
+            }
+            var box pssh.Box
+            n, err := box.BoxHeader.Decode(data)
+            if err != nil {
+               return err
+            }
+            err = box.Read(data[n:])
+            if err != nil {
+               return err
+            }
+            a.pssh = box.Data
+            break
+         }
+         ext, err := get_ext(&represent)
+         if err != nil {
+            return err
+         }
+         if represent.SegmentBase != nil {
+            return a.segment_base(
+               b,
+               ext,
+               &represent,
+            )
+         }
+         if represent.SegmentList != nil {
+            return a.segment_list(
+               b,
+               ext,
+               &represent,
+            )
+         }
+         return a.segment_template(
+            b,
+            ext,
+            &represent,
+         )
+      }
+   }
+   return nil
+}
+
+type DashClient interface {
+   Dash() (*http.Response, error)
+}
+
+type WidevineClient interface {
+   Widevine([]byte) ([]byte, error)
+}
+
+func (a *alfa) get_key(b *bravo) ([]byte, error) {
+   if a.key_id == nil {
+      return nil, nil
+   }
+   private_key1, err := os.ReadFile(b.private_key)
+   if err != nil {
+      return nil, err
+   }
+   client_id1, err := os.ReadFile(b.client_id)
+   if err != nil {
+      return nil, err
+   }
+   if a.pssh == nil {
+      var pssh widevine.Pssh
+      pssh.KeyIds = [][]byte{a.key_id}
+      a.pssh = pssh.Marshal()
+   }
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
+   var module widevine.Cdm
+   err = module.New(private_key1, client_id1, a.pssh)
+   if err != nil {
+      return nil, err
+   }
+   data, err := module.RequestBody()
+   if err != nil {
+      return nil, err
+   }
+   data, err = b.client.Widevine(data)
+   if err != nil {
+      return nil, err
+   }
+   var body widevine.ResponseBody
+   err = body.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   block, err := module.Block(body)
+   if err != nil {
+      return nil, err
+   }
+   containers := body.Container()
+   for {
+      container, ok := containers()
+      if !ok {
+         return nil, errors.New("ResponseBody.Container")
+      }
+      if bytes.Equal(container.Id(), a.key_id) {
+         key := container.Key(block)
+         log.Println("key", base64.StdEncoding.EncodeToString(key))
+         return key, nil
+      }
+   }
+}
+
+func (a *alfa) segment_template(
+   b *bravo,
+   ext string,
+   represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      address, err := initial.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(address)
+      if err != nil {
+         return err
+      }
+      data, err = new(alfa).initialization(data)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   key, err := a.get_key(b)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (a *alfa) segment_list(
+   b *bravo,
+   ext string,
+   represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
+   if err != nil {
+      return err
+   }
+   data, err := get(initial)
+   if err != nil {
+      return err
+   }
+   data, err = new(alfa).initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key(b)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(represent.SegmentList.SegmentUrl))
+   for _, segment := range represent.SegmentList.SegmentUrl {
+      media, err := segment.Media.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+type bravo struct {
+   client WidevineClient
+   client_id string
+   private_key string
+}
+
+func (a *alfa) segment_base(
+   b *bravo,
+   ext string, represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   base := represent.SegmentBase
+   var req http.Request
+   req.Header = http.Header{}
+   // need to use Set for lower case
+   req.Header.Set("range", "bytes="+base.Initialization.Range.String())
+   req.URL = represent.BaseUrl[0]
+   resp, err := http.DefaultClient.Do(&req)
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusPartialContent {
+      return errors.New(resp.Status)
+   }
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   data, err = new(alfa).initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key(b)
+   if err != nil {
+      return err
+   }
+   references, err := write_sidx(&req, base.IndexRange)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(references))
+   for _, reference := range references {
+      base.IndexRange[0] = base.IndexRange[1] + 1
+      base.IndexRange[1] += uint64(reference.Size())
+      data, err = func() ([]byte, error) {
+         req.Header.Set("range", "bytes="+base.IndexRange.String())
+         resp, err := http.DefaultClient.Do(&req)
+         if err != nil {
+            return nil, err
+         }
+         defer resp.Body.Close()
+         if resp.StatusCode != http.StatusPartialContent {
+            return nil, errors.New(resp.Status)
+         }
+         return io.ReadAll(resp.Body)
+      }()
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
 func get(address *url.URL) ([]byte, error) {
    resp, err := http.Get(address.String())
    if err != nil {
@@ -174,388 +548,4 @@ func write_segment(data, key []byte) ([]byte, error) {
       }
    }
    return file1.Append(nil)
-}
-
-// try to get PSSH from DASH then MP4
-func (a *alfa) dash_pssh(
-   client_id, private_key string,
-   d_client DashClient, w_client WidevineClient,
-   home, id string,
-) error {
-   base := &url.URL{}
-   var data []byte
-   if id != "" {
-      var err error
-      data, err = os.ReadFile(home + "/mpd_body")
-      if err != nil {
-         return err
-      }
-      data1, err := os.ReadFile(home + "/mpd_url")
-      if err != nil {
-         return err
-      }
-      err = base.UnmarshalBinary(data1)
-      if err != nil {
-         return err
-      }
-   } else {
-      resp, err := d_client.Dash()
-      if err != nil {
-         return err
-      }
-      defer resp.Body.Close()
-      data, err = io.ReadAll(resp.Body)
-      if err != nil {
-         return err
-      }
-      err = write_file(home+"/mpd_body", data)
-      if err != nil {
-         return err
-      }
-      file1, err := create(home + "/mpd_url")
-      if err != nil {
-         return err
-      }
-      defer file1.Close()
-      base = resp.Request.URL
-      fmt.Fprint(file1, base)
-   }
-   var media dash.Mpd
-   err := media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   media.Set(base)
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      switch id {
-      case "":
-         if i >= 1 {
-            fmt.Println()
-         }
-         fmt.Println(&represent)
-      case represent.Id:
-         for _, protect := range represent.ContentProtection {
-            if protect.SchemeIdUri != widevine_urn {
-               continue
-            }
-            if protect.Pssh == "" {
-               continue
-            }
-            data, err := base64.StdEncoding.DecodeString(protect.Pssh)
-            if err != nil {
-               return err
-            }
-            var box pssh.Box
-            n, err := box.BoxHeader.Decode(data)
-            if err != nil {
-               return err
-            }
-            err = box.Read(data[n:])
-            if err != nil {
-               return err
-            }
-            a.pssh = box.Data
-            break
-         }
-         ext, err := get_ext(&represent)
-         if err != nil {
-            return err
-         }
-         if represent.SegmentBase != nil {
-            return a.segment_base(
-               client_id, private_key,
-               ext,
-               &represent,
-               w_client,
-            )
-         }
-         if represent.SegmentList != nil {
-            return a.segment_list(
-               client_id, private_key,
-               ext,
-               &represent,
-               w_client,
-            )
-         }
-         return a.segment_template(
-            client_id, private_key,
-            ext,
-            &represent,
-            w_client,
-         )
-      }
-   }
-   return nil
-}
-
-type DashClient interface {
-   Dash() (*http.Response, error)
-}
-
-type WidevineClient interface {
-   Widevine([]byte) ([]byte, error)
-}
-
-type bravo struct {
-   client WidevineClient
-   client_id string
-   private_key string
-}
-
-func (a *alfa) get_key(b *bravo) ([]byte, error) {
-   if a.key_id == nil {
-      return nil, nil
-   }
-   private_key1, err := os.ReadFile(b.private_key)
-   if err != nil {
-      return nil, err
-   }
-   client_id1, err := os.ReadFile(b.client_id)
-   if err != nil {
-      return nil, err
-   }
-   if a.pssh == nil {
-      var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{a.key_id}
-      a.pssh = pssh.Marshal()
-   }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(a.pssh))
-   var module widevine.Cdm
-   err = module.New(private_key1, client_id1, a.pssh)
-   if err != nil {
-      return nil, err
-   }
-   data, err := module.RequestBody()
-   if err != nil {
-      return nil, err
-   }
-   data, err = b.client.Widevine(data)
-   if err != nil {
-      return nil, err
-   }
-   var body widevine.ResponseBody
-   err = body.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   block, err := module.Block(body)
-   if err != nil {
-      return nil, err
-   }
-   containers := body.Container()
-   for {
-      container, ok := containers()
-      if !ok {
-         return nil, errors.New("ResponseBody.Container")
-      }
-      if bytes.Equal(container.Id(), a.key_id) {
-         key := container.Key(block)
-         log.Println("key", base64.StdEncoding.EncodeToString(key))
-         return key, nil
-      }
-   }
-}
-
-///
-
-func (a *alfa) segment_template(
-   client_id, private_key string,
-   ext string,
-   represent *dash.Representation,
-   w_client WidevineClient,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      address, err := initial.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(address)
-      if err != nil {
-         return err
-      }
-      data, err = new(alfa).initialization(data)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   key, err := a.get_key(client_id, private_key, w_client)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
-   }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
-   for _, segment := range segments {
-      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func (a *alfa) segment_list(
-   client_id, private_key string,
-   ext string,
-   represent *dash.Representation,
-   w_client WidevineClient,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
-   if err != nil {
-      return err
-   }
-   data, err := get(initial)
-   if err != nil {
-      return err
-   }
-   data, err = new(alfa).initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = file1.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key(client_id, private_key, w_client)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
-   for _, segment := range represent.SegmentList.SegmentUrl {
-      media, err := segment.Media.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func (a *alfa) segment_base(
-   client_id, private_key string,
-   ext string,
-   represent *dash.Representation,
-   w_client WidevineClient,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   base := represent.SegmentBase
-   var req http.Request
-   req.Header = http.Header{}
-   // need to use Set for lower case
-   req.Header.Set("range", "bytes="+base.Initialization.Range.String())
-   req.URL = represent.BaseUrl[0]
-   resp, err := http.DefaultClient.Do(&req)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusPartialContent {
-      return errors.New(resp.Status)
-   }
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   data, err = new(alfa).initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = file1.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key(client_id, private_key, w_client)
-   if err != nil {
-      return err
-   }
-   references, err := write_sidx(&req, base.IndexRange)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(references))
-   for _, reference := range references {
-      base.IndexRange[0] = base.IndexRange[1] + 1
-      base.IndexRange[1] += uint64(reference.Size())
-      data, err = func() ([]byte, error) {
-         req.Header.Set("range", "bytes="+base.IndexRange.String())
-         resp, err := http.DefaultClient.Do(&req)
-         if err != nil {
-            return nil, err
-         }
-         defer resp.Body.Close()
-         if resp.StatusCode != http.StatusPartialContent {
-            return nil, errors.New(resp.Status)
-         }
-         return io.ReadAll(resp.Body)
-      }()
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
 }
