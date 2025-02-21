@@ -4,7 +4,6 @@ import (
    "41.neocities.org/dash"
    "41.neocities.org/sofia/file"
    "41.neocities.org/sofia/pssh"
-   "41.neocities.org/sofia/sidx"
    "41.neocities.org/widevine"
    xhttp "41.neocities.org/x/http"
    "bytes"
@@ -23,11 +22,11 @@ import (
 func (a *alfa) segment_list(
    b *bravo, ext string, represent *dash.Representation,
 ) error {
-   file1, err := create(ext)
+   os_file, err := create(ext)
    if err != nil {
       return err
    }
-   defer file1.Close()
+   defer os_file.Close()
    initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
    if err != nil {
       return err
@@ -40,7 +39,7 @@ func (a *alfa) segment_list(
    if err != nil {
       return err
    }
-   _, err = file1.Write(data)
+   _, err = os_file.Write(data)
    if err != nil {
       return err
    }
@@ -65,7 +64,7 @@ func (a *alfa) segment_list(
       if err != nil {
          return err
       }
-      _, err = file1.Write(data)
+      _, err = os_file.Write(data)
       if err != nil {
          return err
       }
@@ -75,50 +74,52 @@ func (a *alfa) segment_list(
 
 // try to get PSSH from DASH then MP4
 func (a *alfa) dash_pssh(b *bravo, client DashClient, home, id string) error {
-   base := &url.URL{}
-   var data []byte
+   var media dash.Mpd
    if id != "" {
-      var err error
-      data, err = os.ReadFile(home + "/mpd_body")
+      data, err := os.ReadFile(home + "/mpd_body")
       if err != nil {
          return err
       }
-      data1, err := os.ReadFile(home + "/mpd_url")
+      err = media.Unmarshal(data)
       if err != nil {
          return err
       }
-      err = base.UnmarshalBinary(data1)
+      data, err = os.ReadFile(home + "/mpd_url")
       if err != nil {
          return err
       }
+      var base url.URL
+      err = base.UnmarshalBinary(data)
+      if err != nil {
+         return err
+      }
+      media.Set(&base)
    } else {
       resp, err := client.Dash()
       if err != nil {
          return err
       }
       defer resp.Body.Close()
-      data, err = io.ReadAll(resp.Body)
+      data, err := io.ReadAll(resp.Body)
       if err != nil {
          return err
       }
+      err = media.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      media.Set(resp.Request.URL)
       err = write_file(home+"/mpd_body", data)
       if err != nil {
          return err
       }
-      file1, err := create(home + "/mpd_url")
+      os_file, err := create(home + "/mpd_url")
       if err != nil {
          return err
       }
-      defer file1.Close()
-      base = resp.Request.URL
-      fmt.Fprint(file1, base)
+      defer os_file.Close()
+      fmt.Fprint(os_file, resp.Request.URL)
    }
-   var media dash.Mpd
-   err := media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   media.Set(base)
    represents := slices.SortedFunc(media.Representation(),
       func(a, b dash.Representation) int {
          return a.Bandwidth - b.Bandwidth
@@ -160,24 +161,12 @@ func (a *alfa) dash_pssh(b *bravo, client DashClient, home, id string) error {
             return err
          }
          if represent.SegmentBase != nil {
-            return a.segment_base(
-               b,
-               ext,
-               &represent,
-            )
+            return a.segment_base(b, ext, &represent)
          }
          if represent.SegmentList != nil {
-            return a.segment_list(
-               b,
-               ext,
-               &represent,
-            )
+            return a.segment_list(b, ext, &represent)
          }
-         return a.segment_template(
-            b,
-            ext,
-            &represent,
-         )
+         return a.segment_template(b, ext, &represent)
       }
    }
    return nil
@@ -252,12 +241,12 @@ type bravo struct {
 }
 
 func (a *alfa) initialization(data []byte) ([]byte, error) {
-   var file1 file.File
-   err := file1.Read(data)
+   var file_file file.File
+   err := file_file.Read(data)
    if err != nil {
       return nil, err
    }
-   if moov, ok := file1.GetMoov(); ok {
+   if moov, ok := file_file.GetMoov(); ok {
       for _, pssh := range moov.Pssh {
          if pssh.SystemId.String() == widevine_system_id {
             a.pssh = pssh.Data
@@ -275,7 +264,7 @@ func (a *alfa) initialization(data []byte) ([]byte, error) {
          }
       }
    }
-   return file1.Append(nil)
+   return file_file.Append(nil)
 }
 
 func get_ext(represent *dash.Representation) (string, error) {
@@ -357,31 +346,31 @@ func write_segment(data, key []byte) ([]byte, error) {
    if key == nil {
       return data, nil
    }
-   var file1 file.File
-   err := file1.Read(data)
+   var file_file file.File
+   err := file_file.Read(data)
    if err != nil {
       return nil, err
    }
-   track := file1.Moof.Traf
+   track := file_file.Moof.Traf
    if senc := track.Senc; senc != nil {
-      for i, data := range file1.Mdat.Data(&track) {
+      for i, data := range file_file.Mdat.Data(&track) {
          err = senc.Sample[i].DecryptCenc(data, key)
          if err != nil {
             return nil, err
          }
       }
    }
-   return file1.Append(nil)
+   return file_file.Append(nil)
 }
 
 func (a *alfa) segment_template(
    b *bravo, ext string, represent *dash.Representation,
 ) error {
-   file1, err := create(ext)
+   os_file, err := create(ext)
    if err != nil {
       return err
    }
-   defer file1.Close()
+   defer os_file.Close()
    if initial := represent.SegmentTemplate.Initialization; initial != "" {
       address, err := initial.Url(represent)
       if err != nil {
@@ -395,7 +384,7 @@ func (a *alfa) segment_template(
       if err != nil {
          return err
       }
-      _, err = file1.Write(data)
+      _, err = os_file.Write(data)
       if err != nil {
          return err
       }
@@ -425,7 +414,7 @@ func (a *alfa) segment_template(
       if err != nil {
          return err
       }
-      _, err = file1.Write(data)
+      _, err = os_file.Write(data)
       if err != nil {
          return err
       }
@@ -445,39 +434,28 @@ func get(u *url.URL, head http.Header) ([]byte, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
+   switch resp.StatusCode {
+   case http.StatusOK, http.StatusPartialContent:
+   default:
+      var b strings.Builder
+      resp.Write(&b)
+      return nil, errors.New(b.String())
    }
    return io.ReadAll(resp.Body)
 }
 
-///
-
 func (a *alfa) segment_base(
    b *bravo, ext string, represent *dash.Representation,
 ) error {
-   file1, err := create(ext)
+   os_file, err := create(ext)
    if err != nil {
       return err
    }
-   defer file1.Close()
+   defer os_file.Close()
    base := represent.SegmentBase
-   var req http.Request
-   req.Header = http.Header{}
-   // need to use Set for lower case
-   req.Header.Set("range", "bytes="+base.Initialization.Range.String())
-   req.URL = represent.BaseUrl[0]
-   resp, err := http.DefaultClient.Do(&req)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusPartialContent {
-      return errors.New(resp.Status)
-   }
-   data, err := io.ReadAll(resp.Body)
+   data, err := get(represent.BaseUrl[0], http.Header{
+      "range": {"bytes=" + base.Initialization.Range.String()},
+   })
    if err != nil {
       return err
    }
@@ -485,7 +463,7 @@ func (a *alfa) segment_base(
    if err != nil {
       return err
    }
-   _, err = file1.Write(data)
+   _, err = os_file.Write(data)
    if err != nil {
       return err
    }
@@ -493,28 +471,26 @@ func (a *alfa) segment_base(
    if err != nil {
       return err
    }
-   references, err := write_sidx(&req, base.IndexRange)
+   data, err = get(represent.BaseUrl[0], http.Header{
+      "range": {"bytes=" + base.IndexRange.String()},
+   })
+   if err != nil {
+      return err
+   }
+   var file_file file.File
+   err = file_file.Read(data)
    if err != nil {
       return err
    }
    http.DefaultClient.Transport = nil
    var progress xhttp.ProgressParts
-   progress.Set(len(references))
-   for _, reference := range references {
+   progress.Set(len(file_file.Sidx.Reference))
+   for _, reference := range file_file.Sidx.Reference {
       base.IndexRange[0] = base.IndexRange[1] + 1
       base.IndexRange[1] += uint64(reference.Size())
-      data, err = func() ([]byte, error) {
-         req.Header.Set("range", "bytes="+base.IndexRange.String())
-         resp, err := http.DefaultClient.Do(&req)
-         if err != nil {
-            return nil, err
-         }
-         defer resp.Body.Close()
-         if resp.StatusCode != http.StatusPartialContent {
-            return nil, errors.New(resp.Status)
-         }
-         return io.ReadAll(resp.Body)
-      }()
+      data, err = get(represent.BaseUrl[0], http.Header{
+         "range": {"bytes=" + base.IndexRange.String()},
+      })
       if err != nil {
          return err
       }
@@ -523,29 +499,10 @@ func (a *alfa) segment_base(
       if err != nil {
          return err
       }
-      _, err = file1.Write(data)
+      _, err = os_file.Write(data)
       if err != nil {
          return err
       }
    }
    return nil
-}
-
-func write_sidx(req *http.Request, index dash.Range) ([]sidx.Reference, error) {
-   req.Header.Set("range", "bytes="+index.String())
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var file1 file.File
-   err = file1.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   return file1.Sidx.Reference, nil
 }
