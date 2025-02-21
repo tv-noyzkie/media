@@ -20,7 +20,7 @@ import (
 )
 
 // RECEIVER CANNOT BE NIL
-func (t *type_zero) initialization(data []byte) ([]byte, error) {
+func (one *type_one) initialization(data []byte) ([]byte, error) {
    var file_file file.File
    err := file_file.Read(data)
    if err != nil {
@@ -29,13 +29,13 @@ func (t *type_zero) initialization(data []byte) ([]byte, error) {
    if moov, ok := file_file.GetMoov(); ok {
       for _, pssh := range moov.Pssh {
          if pssh.SystemId.String() == widevine_system_id {
-            t.pssh = pssh.Data
+            one.pssh = pssh.Data
          }
          copy(pssh.BoxHeader.Type[:], "free") // Firefox
       }
       description := moov.Trak.Mdia.Minf.Stbl.Stsd
       if sinf, ok := description.Sinf(); ok {
-         t.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         one.key_id = sinf.Schi.Tenc.DefaultKid[:]
          // Firefox
          copy(sinf.BoxHeader.Type[:], "free")
          if sample, ok := description.SampleEntry(); ok {
@@ -47,13 +47,13 @@ func (t *type_zero) initialization(data []byte) ([]byte, error) {
    return file_file.Append(nil)
 }
 
-type type_zero struct {
+type type_one struct {
    key_id []byte
    pssh   []byte
 }
 
 // try to get PSSH from DASH then MP4
-func (t *TypeOne) MethodZero(home string, client DashClient) error {
+func (t *TypeZero) MethodZero(home string, client DashClient) error {
    var media dash.Mpd
    resp, err := client.Dash()
    if err != nil {
@@ -89,76 +89,6 @@ func (t *TypeOne) MethodZero(home string, client DashClient) error {
          fmt.Println()
       }
       fmt.Println(&represent)
-   }
-   return nil
-}
-
-func (t *TypeOne) MethodOne(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id != id {
-         continue
-      }
-      var ext string
-      switch *represent.MimeType {
-      case "audio/mp4":
-         ext = ".m4a"
-      case "text/vtt":
-         ext = ".vtt"
-      case "video/mp4":
-         ext = ".m4v"
-      default:
-         return errors.New(*represent.MimeType)
-      }
-      var zero type_zero
-      for _, protect := range represent.ContentProtection {
-         if protect.SchemeIdUri != widevine_urn {
-            continue
-         }
-         if protect.Pssh == "" {
-            continue
-         }
-         data, err := base64.StdEncoding.DecodeString(protect.Pssh)
-         if err != nil {
-            return err
-         }
-         var box pssh.Box
-         n, err := box.BoxHeader.Decode(data)
-         if err != nil {
-            return err
-         }
-         err = box.Read(data[n:])
-         if err != nil {
-            return err
-         }
-         zero.pssh = box.Data
-         break
-      }
-      if represent.SegmentBase != nil {
-         return zero.segment_base(t, ext, &represent)
-      }
-      if represent.SegmentList != nil {
-         return zero.segment_list(t, ext, &represent)
-      }
-      return zero.segment_template(t, ext, &represent)
    }
    return nil
 }
@@ -251,7 +181,7 @@ func create(name string) (*os.File, error) {
    return os.Create(name)
 }
 
-type TypeOne struct {
+type TypeZero struct {
    client WidevineClient
    client_id string
    private_key string
@@ -278,10 +208,8 @@ func write_segment(data, key []byte) ([]byte, error) {
    return file_file.Append(nil)
 }
 
-///
-
-func (t *type_zero) segment_template(
-   one *TypeOne, ext string, represent *dash.Representation,
+func (t *TypeZero) segment_template(
+   one *type_one, represent *dash.Representation, ext string,
 ) error {
    os_file, err := create(ext)
    if err != nil {
@@ -297,7 +225,7 @@ func (t *type_zero) segment_template(
       if err != nil {
          return err
       }
-      data, err = t.initialization(data)
+      data, err = one.initialization(data)
       if err != nil {
          return err
       }
@@ -306,7 +234,7 @@ func (t *type_zero) segment_template(
          return err
       }
    }
-   key, err := t.get_key(one)
+   key, err := one.get_key(t)
    if err != nil {
       return err
    }
@@ -339,8 +267,8 @@ func (t *type_zero) segment_template(
    return nil
 }
 
-func (t *type_zero) segment_base(
-   one *TypeOne, ext string, represent *dash.Representation,
+func (t *TypeZero) segment_base(
+   one *type_one, represent *dash.Representation, ext string,
 ) error {
    os_file, err := create(ext)
    if err != nil {
@@ -354,7 +282,7 @@ func (t *type_zero) segment_base(
    if err != nil {
       return err
    }
-   data, err = t.initialization(data)
+   data, err = one.initialization(data)
    if err != nil {
       return err
    }
@@ -362,7 +290,7 @@ func (t *type_zero) segment_base(
    if err != nil {
       return err
    }
-   key, err := t.get_key(one)
+   key, err := one.get_key(t)
    if err != nil {
       return err
    }
@@ -402,8 +330,10 @@ func (t *type_zero) segment_base(
    return nil
 }
 
-func (t *type_zero) segment_list(
-   one *TypeOne, ext string, represent *dash.Representation,
+///
+
+func (one *type_one) segment_list(
+   zero *TypeZero, ext string, represent *dash.Representation,
 ) error {
    os_file, err := create(ext)
    if err != nil {
@@ -418,7 +348,7 @@ func (t *type_zero) segment_list(
    if err != nil {
       return err
    }
-   data, err = t.initialization(data)
+   data, err = one.initialization(data)
    if err != nil {
       return err
    }
@@ -426,7 +356,7 @@ func (t *type_zero) segment_list(
    if err != nil {
       return err
    }
-   key, err := t.get_key(one)
+   key, err := one.get_key(zero)
    if err != nil {
       return err
    }
@@ -455,26 +385,26 @@ func (t *type_zero) segment_list(
    return nil
 }
 
-func (t *type_zero) get_key(one *TypeOne) ([]byte, error) {
-   if t.key_id == nil {
+func (one *type_one) get_key(zero *TypeZero) ([]byte, error) {
+   if one.key_id == nil {
       return nil, nil
    }
-   private_key1, err := os.ReadFile(one.private_key)
+   private_key1, err := os.ReadFile(zero.private_key)
    if err != nil {
       return nil, err
    }
-   client_id1, err := os.ReadFile(one.client_id)
+   client_id1, err := os.ReadFile(zero.client_id)
    if err != nil {
       return nil, err
    }
-   if t.pssh == nil {
+   if one.pssh == nil {
       var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{t.key_id}
-      t.pssh = pssh.Marshal()
+      pssh.KeyIds = [][]byte{one.key_id}
+      one.pssh = pssh.Marshal()
    }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(t.pssh))
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(one.pssh))
    var module widevine.Cdm
-   err = module.New(private_key1, client_id1, t.pssh)
+   err = module.New(private_key1, client_id1, one.pssh)
    if err != nil {
       return nil, err
    }
@@ -482,7 +412,7 @@ func (t *type_zero) get_key(one *TypeOne) ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   data, err = one.client.Widevine(data)
+   data, err = zero.client.Widevine(data)
    if err != nil {
       return nil, err
    }
@@ -501,10 +431,80 @@ func (t *type_zero) get_key(one *TypeOne) ([]byte, error) {
       if !ok {
          return nil, errors.New("ResponseBody.Container")
       }
-      if bytes.Equal(container.Id(), t.key_id) {
+      if bytes.Equal(container.Id(), one.key_id) {
          key := container.Key(block)
          log.Println("key", base64.StdEncoding.EncodeToString(key))
          return key, nil
       }
    }
+}
+
+func (t *TypeZero) MethodOne(home, id string) error {
+   data, err := os.ReadFile(home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = os.ReadFile(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id != id {
+         continue
+      }
+      var ext string
+      switch *represent.MimeType {
+      case "audio/mp4":
+         ext = ".m4a"
+      case "text/vtt":
+         ext = ".vtt"
+      case "video/mp4":
+         ext = ".m4v"
+      default:
+         return errors.New(*represent.MimeType)
+      }
+      var one type_one
+      for _, protect := range represent.ContentProtection {
+         if protect.SchemeIdUri != widevine_urn {
+            continue
+         }
+         if protect.Pssh == "" {
+            continue
+         }
+         data, err := base64.StdEncoding.DecodeString(protect.Pssh)
+         if err != nil {
+            return err
+         }
+         var box pssh.Box
+         n, err := box.BoxHeader.Decode(data)
+         if err != nil {
+            return err
+         }
+         err = box.Read(data[n:])
+         if err != nil {
+            return err
+         }
+         one.pssh = box.Data
+         break
+      }
+      if represent.SegmentBase != nil {
+         return t.segment_base(&one, &represent, ext)
+      }
+      if represent.SegmentList != nil {
+         return one.segment_list(t, ext, &represent)
+      }
+      return t.segment_template(&one, &represent, ext)
+   }
+   return nil
 }
