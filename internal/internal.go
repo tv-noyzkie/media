@@ -301,19 +301,21 @@ type WidevineClient interface {
    Widevine([]byte) ([]byte, error)
 }
 
-///
+type bravo struct {
+   client WidevineClient
+   client_id string
+   private_key string
+}
 
-func (a *alfa) get_key(
-   client_id, private_key string, w_client WidevineClient,
-) ([]byte, error) {
+func (a *alfa) get_key(b *bravo) ([]byte, error) {
    if a.key_id == nil {
       return nil, nil
    }
-   private_key1, err := os.ReadFile(private_key)
+   private_key1, err := os.ReadFile(b.private_key)
    if err != nil {
       return nil, err
    }
-   client_id1, err := os.ReadFile(client_id)
+   client_id1, err := os.ReadFile(b.client_id)
    if err != nil {
       return nil, err
    }
@@ -332,7 +334,7 @@ func (a *alfa) get_key(
    if err != nil {
       return nil, err
    }
-   data, err = w_client.Widevine(data)
+   data, err = b.client.Widevine(data)
    if err != nil {
       return nil, err
    }
@@ -358,6 +360,8 @@ func (a *alfa) get_key(
       }
    }
 }
+
+///
 
 func (a *alfa) segment_template(
    client_id, private_key string,
