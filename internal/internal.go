@@ -21,11 +21,7 @@ import (
 )
 
 // try to get PSSH from DASH then MP4
-func (a *alfa) dash_pssh(
-   b *bravo,
-   client DashClient,
-   home, id string,
-) error {
+func (a *alfa) dash_pssh(b *bravo, client DashClient, home, id string) error {
    base := &url.URL{}
    var data []byte
    if id != "" {
@@ -196,122 +192,6 @@ func (a *alfa) get_key(b *bravo) ([]byte, error) {
    }
 }
 
-func (a *alfa) segment_template(
-   b *bravo,
-   ext string,
-   represent *dash.Representation,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      address, err := initial.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(address)
-      if err != nil {
-         return err
-      }
-      data, err = new(alfa).initialization(data)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   key, err := a.get_key(b)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
-   }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
-   for _, segment := range segments {
-      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func (a *alfa) segment_list(
-   b *bravo,
-   ext string,
-   represent *dash.Representation,
-) error {
-   file1, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer file1.Close()
-   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
-   if err != nil {
-      return err
-   }
-   data, err := get(initial)
-   if err != nil {
-      return err
-   }
-   data, err = new(alfa).initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = file1.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := a.get_key(b)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
-   for _, segment := range represent.SegmentList.SegmentUrl {
-      media, err := segment.Media.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(media)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = file1.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
 type bravo struct {
    client WidevineClient
    client_id string
@@ -319,8 +199,7 @@ type bravo struct {
 }
 
 func (a *alfa) segment_base(
-   b *bravo,
-   ext string, represent *dash.Representation,
+   b *bravo, ext string, represent *dash.Representation,
 ) error {
    file1, err := create(ext)
    if err != nil {
@@ -393,19 +272,6 @@ func (a *alfa) segment_base(
       }
    }
    return nil
-}
-func get(address *url.URL) ([]byte, error) {
-   resp, err := http.Get(address.String())
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
 }
 
 func (a *alfa) initialization(data []byte) ([]byte, error) {
@@ -548,4 +414,138 @@ func write_segment(data, key []byte) ([]byte, error) {
       }
    }
    return file1.Append(nil)
+}
+
+func get(u *url.URL, head http.Header) ([]byte, error) {
+   req := http.Request{URL: u}
+   if head != nil {
+      req.Header = head
+   } else {
+      req.Header = http.Header{}
+   }
+   resp, err := http.DefaultClient.Do(&req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+///
+
+func (a *alfa) segment_template(
+   b *bravo, ext string, represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      address, err := initial.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(address)
+      if err != nil {
+         return err
+      }
+      data, err = new(alfa).initialization(data)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   key, err := a.get_key(b)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (a *alfa) segment_list(
+   b *bravo, ext string, represent *dash.Representation,
+) error {
+   file1, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer file1.Close()
+   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
+   if err != nil {
+      return err
+   }
+   data, err := get(initial)
+   if err != nil {
+      return err
+   }
+   data, err = new(alfa).initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = file1.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := a.get_key(b)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(represent.SegmentList.SegmentUrl))
+   for _, segment := range represent.SegmentList.SegmentUrl {
+      media, err := segment.Media.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(media)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = file1.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
 }
