@@ -20,179 +20,31 @@ import (
 )
 
 // RECEIVER CANNOT BE NIL
-func (t *type_zero) segment_template(
-   one *type_one, ext string, represent *dash.Representation,
-) error {
-   os_file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      address, err := initial.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(address, nil)
-      if err != nil {
-         return err
-      }
-      data, err = t.initialization(data)
-      if err != nil {
-         return err
-      }
-      _, err = os_file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   key, err := t.get_key(one)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
-   }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
-   for _, segment := range segments {
-      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
-      if err != nil {
-         return err
-      }
-      data, err := get(media, nil)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = os_file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
-}
-
-func (t *type_zero) segment_base(
-   one *type_one, ext string, represent *dash.Representation,
-) error {
-   os_file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   base := represent.SegmentBase
-   data, err := get(represent.BaseUrl[0], http.Header{
-      "range": {"bytes=" + base.Initialization.Range.String()},
-   })
-   if err != nil {
-      return err
-   }
-   data, err = t.initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = os_file.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := t.get_key(one)
-   if err != nil {
-      return err
-   }
-   data, err = get(represent.BaseUrl[0], http.Header{
-      "range": {"bytes=" + base.IndexRange.String()},
-   })
-   if err != nil {
-      return err
-   }
+func (t *type_zero) initialization(data []byte) ([]byte, error) {
    var file_file file.File
-   err = file_file.Read(data)
+   err := file_file.Read(data)
    if err != nil {
-      return err
+      return nil, err
    }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(file_file.Sidx.Reference))
-   for _, reference := range file_file.Sidx.Reference {
-      base.IndexRange[0] = base.IndexRange[1] + 1
-      base.IndexRange[1] += uint64(reference.Size())
-      data, err = get(represent.BaseUrl[0], http.Header{
-         "range": {"bytes=" + base.IndexRange.String()},
-      })
-      if err != nil {
-         return err
+   if moov, ok := file_file.GetMoov(); ok {
+      for _, pssh := range moov.Pssh {
+         if pssh.SystemId.String() == widevine_system_id {
+            t.pssh = pssh.Data
+         }
+         copy(pssh.BoxHeader.Type[:], "free") // Firefox
       }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = os_file.Write(data)
-      if err != nil {
-         return err
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         t.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
       }
    }
-   return nil
-}
-
-func (t *type_zero) segment_list(
-   one *type_one, ext string, represent *dash.Representation,
-) error {
-   os_file, err := create(ext)
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
-   if err != nil {
-      return err
-   }
-   data, err := get(initial, nil)
-   if err != nil {
-      return err
-   }
-   data, err = t.initialization(data)
-   if err != nil {
-      return err
-   }
-   _, err = os_file.Write(data)
-   if err != nil {
-      return err
-   }
-   key, err := t.get_key(one)
-   if err != nil {
-      return err
-   }
-   http.DefaultClient.Transport = nil
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
-   for _, segment := range represent.SegmentList.SegmentUrl {
-      media, err := segment.Media.Url(represent)
-      if err != nil {
-         return err
-      }
-      data, err := get(media, nil)
-      if err != nil {
-         return err
-      }
-      progress.Next()
-      data, err = write_segment(data, key)
-      if err != nil {
-         return err
-      }
-      _, err = os_file.Write(data)
-      if err != nil {
-         return err
-      }
-   }
-   return nil
+   return file_file.Append(nil)
 }
 
 type type_zero struct {
@@ -201,7 +53,7 @@ type type_zero struct {
 }
 
 // try to get PSSH from DASH then MP4
-func (t *type_one) method_zero(home string, client DashClient) error {
+func (t *TypeOne) MethodZero(home string, client DashClient) error {
    var media dash.Mpd
    resp, err := client.Dash()
    if err != nil {
@@ -241,12 +93,12 @@ func (t *type_one) method_zero(home string, client DashClient) error {
    return nil
 }
 
-func (t *type_one) method_one(home, id string) error {
-   var media dash.Mpd
+func (t *TypeOne) MethodOne(home, id string) error {
    data, err := os.ReadFile(home + "/mpd_body")
    if err != nil {
       return err
    }
+   var media dash.Mpd
    err = media.Unmarshal(data)
    if err != nil {
       return err
@@ -399,7 +251,7 @@ func create(name string) (*os.File, error) {
    return os.Create(name)
 }
 
-type type_one struct {
+type TypeOne struct {
    client WidevineClient
    client_id string
    private_key string
@@ -428,35 +280,182 @@ func write_segment(data, key []byte) ([]byte, error) {
 
 ///
 
-// RECEIVER CANNOT BE NIL
-func (t *type_zero) initialization(data []byte) ([]byte, error) {
-   var file_file file.File
-   err := file_file.Read(data)
+func (t *type_zero) segment_template(
+   one *TypeOne, ext string, represent *dash.Representation,
+) error {
+   os_file, err := create(ext)
    if err != nil {
-      return nil, err
+      return err
    }
-   if moov, ok := file_file.GetMoov(); ok {
-      for _, pssh := range moov.Pssh {
-         if pssh.SystemId.String() == widevine_system_id {
-            t.pssh = pssh.Data
-         }
-         copy(pssh.BoxHeader.Type[:], "free") // Firefox
+   defer os_file.Close()
+   if initial := represent.SegmentTemplate.Initialization; initial != "" {
+      address, err := initial.Url(represent)
+      if err != nil {
+         return err
       }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         t.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
+      data, err := get(address, nil)
+      if err != nil {
+         return err
+      }
+      data, err = t.initialization(data)
+      if err != nil {
+         return err
+      }
+      _, err = os_file.Write(data)
+      if err != nil {
+         return err
       }
    }
-   return file_file.Append(nil)
+   key, err := t.get_key(one)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var segments []int
+   for r := range represent.Representation() {
+      segments = slices.AppendSeq(segments, r.Segment())
+   }
+   var progress xhttp.ProgressParts
+   progress.Set(len(segments))
+   for _, segment := range segments {
+      media, err := represent.SegmentTemplate.Media.Url(represent, segment)
+      if err != nil {
+         return err
+      }
+      data, err := get(media, nil)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = os_file.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
 }
 
-func (t *type_zero) get_key(one *type_one) ([]byte, error) {
+func (t *type_zero) segment_base(
+   one *TypeOne, ext string, represent *dash.Representation,
+) error {
+   os_file, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   base := represent.SegmentBase
+   data, err := get(represent.BaseUrl[0], http.Header{
+      "range": {"bytes=" + base.Initialization.Range.String()},
+   })
+   if err != nil {
+      return err
+   }
+   data, err = t.initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = os_file.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := t.get_key(one)
+   if err != nil {
+      return err
+   }
+   data, err = get(represent.BaseUrl[0], http.Header{
+      "range": {"bytes=" + base.IndexRange.String()},
+   })
+   if err != nil {
+      return err
+   }
+   var file_file file.File
+   err = file_file.Read(data)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(file_file.Sidx.Reference))
+   for _, reference := range file_file.Sidx.Reference {
+      base.IndexRange[0] = base.IndexRange[1] + 1
+      base.IndexRange[1] += uint64(reference.Size())
+      data, err = get(represent.BaseUrl[0], http.Header{
+         "range": {"bytes=" + base.IndexRange.String()},
+      })
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = os_file.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (t *type_zero) segment_list(
+   one *TypeOne, ext string, represent *dash.Representation,
+) error {
+   os_file, err := create(ext)
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   initial, err := represent.SegmentList.Initialization.SourceUrl.Url(represent)
+   if err != nil {
+      return err
+   }
+   data, err := get(initial, nil)
+   if err != nil {
+      return err
+   }
+   data, err = t.initialization(data)
+   if err != nil {
+      return err
+   }
+   _, err = os_file.Write(data)
+   if err != nil {
+      return err
+   }
+   key, err := t.get_key(one)
+   if err != nil {
+      return err
+   }
+   http.DefaultClient.Transport = nil
+   var progress xhttp.ProgressParts
+   progress.Set(len(represent.SegmentList.SegmentUrl))
+   for _, segment := range represent.SegmentList.SegmentUrl {
+      media, err := segment.Media.Url(represent)
+      if err != nil {
+         return err
+      }
+      data, err := get(media, nil)
+      if err != nil {
+         return err
+      }
+      progress.Next()
+      data, err = write_segment(data, key)
+      if err != nil {
+         return err
+      }
+      _, err = os_file.Write(data)
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (t *type_zero) get_key(one *TypeOne) ([]byte, error) {
    if t.key_id == nil {
       return nil, nil
    }
