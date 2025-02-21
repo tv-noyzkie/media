@@ -29,8 +29,8 @@ type WidevineClient interface {
 func (a *alfa) segment_template(
    client_id, private_key string,
    ext string,
-   w_client WidevineClient,
    represent *dash.Representation,
+   w_client WidevineClient,
 ) error {
    file1, err := create(ext)
    if err != nil {

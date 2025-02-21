@@ -118,8 +118,10 @@ func (a *alfa) dash_pssh(
             )
          }
          return a.segment_template(
+            client_id, private_key,
             ext,
             &represent,
+            w_client,
          )
       }
    }
