@@ -19,87 +19,10 @@ import (
    "strings"
 )
 
-// RECEIVER CANNOT BE NIL
-func (one *type_one) initialization(data []byte) ([]byte, error) {
-   var file_file file.File
-   err := file_file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   if moov, ok := file_file.GetMoov(); ok {
-      for _, pssh := range moov.Pssh {
-         if pssh.SystemId.String() == widevine_system_id {
-            one.pssh = pssh.Data
-         }
-         copy(pssh.BoxHeader.Type[:], "free") // Firefox
-      }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         one.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
-      }
-   }
-   return file_file.Append(nil)
-}
-
-type type_one struct {
-   key_id []byte
-   pssh   []byte
-}
-
-// try to get PSSH from DASH then MP4
-func (t *TypeZero) MethodZero(home string, client DashClient) error {
-   var media dash.Mpd
-   resp, err := client.Dash()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   media.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-type DashClient interface {
-   Dash() (*http.Response, error)
-}
-
-type WidevineClient interface {
-   Widevine([]byte) ([]byte, error)
-}
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
 
 var Forward = []struct {
    Country string
@@ -166,11 +89,6 @@ func init() {
    xhttp.Transport{}.DefaultClient()
 }
 
-const (
-   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
-   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-)
-
 func write_file(name string, data []byte) error {
    log.Println("WriteFile", name)
    return os.WriteFile(name, data, os.ModePerm)
@@ -179,12 +97,6 @@ func write_file(name string, data []byte) error {
 func create(name string) (*os.File, error) {
    log.Println("Create", name)
    return os.Create(name)
-}
-
-type TypeZero struct {
-   client WidevineClient
-   client_id string
-   private_key string
 }
 
 func write_segment(data, key []byte) ([]byte, error) {
@@ -208,10 +120,32 @@ func write_segment(data, key []byte) ([]byte, error) {
    return file_file.Append(nil)
 }
 
+func get_file(represent *dash.Representation) (*os.File, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return create(".m4a")
+   case "text/vtt":
+      return create(".vtt")
+   case "video/mp4":
+      return create(".m4v")
+   }
+   return nil, errors.New(*represent.MimeType)
+}
+
+type DashClient interface {
+   Dash() (*http.Response, error)
+}
+
+type TypeZero struct {
+   client WidevineClient
+   client_id string
+   private_key string
+}
+
 func (t *TypeZero) segment_template(
-   one *type_one, represent *dash.Representation, ext string,
+   one *type_one, represent *dash.Representation,
 ) error {
-   os_file, err := create(ext)
+   os_file, err := get_file(represent)
    if err != nil {
       return err
    }
@@ -234,7 +168,7 @@ func (t *TypeZero) segment_template(
          return err
       }
    }
-   key, err := one.get_key(t)
+   key, err := t.get_key(one)
    if err != nil {
       return err
    }
@@ -268,9 +202,9 @@ func (t *TypeZero) segment_template(
 }
 
 func (t *TypeZero) segment_base(
-   one *type_one, represent *dash.Representation, ext string,
+   one *type_one, represent *dash.Representation,
 ) error {
-   os_file, err := create(ext)
+   os_file, err := get_file(represent)
    if err != nil {
       return err
    }
@@ -290,7 +224,7 @@ func (t *TypeZero) segment_base(
    if err != nil {
       return err
    }
-   key, err := one.get_key(t)
+   key, err := t.get_key(one)
    if err != nil {
       return err
    }
@@ -330,12 +264,10 @@ func (t *TypeZero) segment_base(
    return nil
 }
 
-///
-
-func (one *type_one) segment_list(
-   zero *TypeZero, ext string, represent *dash.Representation,
+func (t *TypeZero) segment_list(
+   one *type_one, represent *dash.Representation,
 ) error {
-   os_file, err := create(ext)
+   os_file, err := get_file(represent)
    if err != nil {
       return err
    }
@@ -356,7 +288,7 @@ func (one *type_one) segment_list(
    if err != nil {
       return err
    }
-   key, err := one.get_key(zero)
+   key, err := t.get_key(one)
    if err != nil {
       return err
    }
@@ -385,15 +317,15 @@ func (one *type_one) segment_list(
    return nil
 }
 
-func (one *type_one) get_key(zero *TypeZero) ([]byte, error) {
+func (t *TypeZero) get_key(one *type_one) ([]byte, error) {
    if one.key_id == nil {
       return nil, nil
    }
-   private_key1, err := os.ReadFile(zero.private_key)
+   private_key1, err := os.ReadFile(t.private_key)
    if err != nil {
       return nil, err
    }
-   client_id1, err := os.ReadFile(zero.client_id)
+   client_id1, err := os.ReadFile(t.client_id)
    if err != nil {
       return nil, err
    }
@@ -412,7 +344,7 @@ func (one *type_one) get_key(zero *TypeZero) ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   data, err = zero.client.Widevine(data)
+   data, err = t.client.Widevine(data)
    if err != nil {
       return nil, err
    }
@@ -439,6 +371,47 @@ func (one *type_one) get_key(zero *TypeZero) ([]byte, error) {
    }
 }
 
+// try to get PSSH from DASH then MP4
+func (t *TypeZero) MethodZero(home string, client DashClient) error {
+   var media dash.Mpd
+   resp, err := client.Dash()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   media.Set(resp.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
 func (t *TypeZero) MethodOne(home, id string) error {
    data, err := os.ReadFile(home + "/mpd_body")
    if err != nil {
@@ -462,17 +435,6 @@ func (t *TypeZero) MethodOne(home, id string) error {
    for represent := range media.Representation() {
       if represent.Id != id {
          continue
-      }
-      var ext string
-      switch *represent.MimeType {
-      case "audio/mp4":
-         ext = ".m4a"
-      case "text/vtt":
-         ext = ".vtt"
-      case "video/mp4":
-         ext = ".m4v"
-      default:
-         return errors.New(*represent.MimeType)
       }
       var one type_one
       for _, protect := range represent.ContentProtection {
@@ -499,12 +461,49 @@ func (t *TypeZero) MethodOne(home, id string) error {
          break
       }
       if represent.SegmentBase != nil {
-         return t.segment_base(&one, &represent, ext)
+         return t.segment_base(&one, &represent)
       }
       if represent.SegmentList != nil {
-         return one.segment_list(t, ext, &represent)
+         return t.segment_list(&one, &represent)
       }
-      return t.segment_template(&one, &represent, ext)
+      return t.segment_template(&one, &represent)
    }
    return nil
+}
+
+type WidevineClient interface {
+   Widevine([]byte) ([]byte, error)
+}
+
+// RECEIVER CANNOT BE NIL
+func (one *type_one) initialization(data []byte) ([]byte, error) {
+   var file_file file.File
+   err := file_file.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   if moov, ok := file_file.GetMoov(); ok {
+      for _, pssh := range moov.Pssh {
+         if pssh.SystemId.String() == widevine_system_id {
+            one.pssh = pssh.Data
+         }
+         copy(pssh.BoxHeader.Type[:], "free") // Firefox
+      }
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         one.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
+      }
+   }
+   return file_file.Append(nil)
+}
+
+type type_one struct {
+   key_id []byte
+   pssh   []byte
 }
