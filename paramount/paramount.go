@@ -39,41 +39,9 @@ func cms_account(id string) int64 {
    return int64(i)
 }
 
-type SessionToken struct {
+type Session struct {
    LsSession string `json:"ls_session"`
    Url string
-}
-
-// 15.0.52
-var ComCbsApp = AppToken{
-   AppSecret: "4fb47ec1f5c17caa",
-   SecretKey: secret_key,
-}
-
-// 15.0.52
-var ComCbsCa = AppToken{
-   AppSecret: "e55edaeb8451f737",
-   SecretKey: secret_key,
-}
-
-func (a *AppToken) encode() (string, error) {
-   key, err := hex.DecodeString(a.SecretKey)
-   if err != nil {
-      return "", err
-   }
-   block, err := aes.NewCipher(key)
-   if err != nil {
-      return "", err
-   }
-   var iv [aes.BlockSize]byte
-   data := []byte{'|'}
-   data = append(data, a.AppSecret...)
-   data = pad(data)
-   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
-   data1 := []byte{0, aes.BlockSize}
-   data1 = append(data1, iv[:]...)
-   data1 = append(data1, data...)
-   return base64.StdEncoding.EncodeToString(data1), nil
 }
 
 type Item struct {
@@ -82,42 +50,7 @@ type Item struct {
    ContentId string
 }
 
-// must use app token and IP address for US
-func (a *AppToken) Session(content_id string) (*SessionToken, error) {
-   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
-   req.URL.Path = func() string {
-      var b strings.Builder
-      b.WriteString("/apps-api/v3.1/androidphone/irdeto-control")
-      b.WriteString("/anonymous-session-token.json")
-      return b.String()
-   }()
-   token, err := a.encode()
-   if err != nil {
-      return nil, err
-   }
-   req.URL.RawQuery = url.Values{
-      "at": {token},
-      "contentId": {content_id},
-   }.Encode()
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   session := &SessionToken{}
-   err = json.NewDecoder(resp.Body).Decode(session)
-   if err != nil {
-      return nil, err
-   }
-   return session, nil
-}
-
-func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
+func (s *Session) Widevine() func([]byte) ([]byte, error) {
    return func(data []byte) ([]byte, error) {
       req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
       if err != nil {
@@ -136,47 +69,7 @@ func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
    }
 }
 
-type AppToken struct {
-   AppSecret string
-   SecretKey string
-}
-
-// must use app token and IP address for correct location
-func (a *AppToken) Item(cid string) (*Item, error) {
-   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
-   req.URL.Path = func() string {
-      var b strings.Builder
-      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
-      b.WriteString(cid)
-      b.WriteString(".json")
-      return b.String()
-   }()
-   token, err := a.encode()
-   if err != nil {
-      return nil, err
-   }
-   req.URL.RawQuery = url.Values{"at": {token}}.Encode()
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   var value struct {
-      Error string
-      ItemList []Item
-   }
-   err = json.NewDecoder(resp.Body).Decode(&value)
-   if err != nil {
-      return nil, err
-   }
-   if value.Error != "" {
-      return nil, errors.New(value.Error)
-   }
-   return &value.ItemList[0], nil
-}
-
-// must use IP address for correct location
-func (i *Item) Mpd() (*http.Response, error) {
+func (i *Item) Mpd(client *http.Client) (*http.Response, error) {
    req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
    req.URL.Path = func() string {
       b := []byte("/s/")
@@ -191,5 +84,97 @@ func (i *Item) Mpd() (*http.Response, error) {
       "assetTypes": {i.AssetType},
       "formats": {"MPEG-DASH"},
    }.Encode()
-   return http.DefaultClient.Do(req)
+   return client.Do(req)
+}
+
+type AppSecret string
+
+// 15.0.52
+const ComCbsApp AppSecret = "4fb47ec1f5c17caa"
+
+// 15.0.52
+const ComCbsCa AppSecret = "e55edaeb8451f737"
+
+func (a AppSecret) At() (At, error) {
+   key, err := hex.DecodeString(secret_key)
+   if err != nil {
+      return "", err
+   }
+   block, err := aes.NewCipher(key)
+   if err != nil {
+      return "", err
+   }
+   var iv [aes.BlockSize]byte
+   data := []byte{'|'}
+   data = append(data, a...)
+   data = pad(data)
+   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
+   data1 := []byte{0, aes.BlockSize}
+   data1 = append(data1, iv[:]...)
+   data1 = append(data1, data...)
+   return At(base64.StdEncoding.EncodeToString(data1)), nil
+}
+
+func (a At) Item(cid string, client *http.Client) (*Item, error) {
+   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
+   req.URL.Path = func() string {
+      var b strings.Builder
+      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
+      b.WriteString(cid)
+      b.WriteString(".json")
+      return b.String()
+   }()
+   req.URL.RawQuery = "at=" + string(a)
+   resp, err := client.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return nil, err
+   }
+   var value struct {
+      ItemList []Item
+   }
+   err = json.Unmarshal(data, &value)
+   if err != nil {
+      return nil, err
+   }
+   if len(value.ItemList) == 0 {
+      return nil, errors.New(string(data))
+   }
+   return &value.ItemList[0], nil
+}
+
+type At string
+
+func (a At) Session(content_id string, client *http.Client) (*Session, error) {
+   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
+   req.URL.Path = func() string {
+      var b strings.Builder
+      b.WriteString("/apps-api/v3.1/androidphone/irdeto-control")
+      b.WriteString("/anonymous-session-token.json")
+      return b.String()
+   }()
+   req.URL.RawQuery = url.Values{
+      "at": {string(a)},
+      "contentId": {content_id},
+   }.Encode()
+   resp, err := client.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var b strings.Builder
+      resp.Write(&b)
+      return nil, errors.New(b.String())
+   }
+   session1 := &Session{}
+   err = json.NewDecoder(resp.Body).Decode(session1)
+   if err != nil {
+      return nil, err
+   }
+   return session1, nil
 }

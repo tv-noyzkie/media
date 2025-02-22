@@ -3,18 +3,12 @@ package main
 import (
    "41.neocities.org/media/internal"
    "41.neocities.org/media/paramount"
+   "41.neocities.org/platform/mullvad"
    "flag"
+   "net/http"
    "os"
    "path/filepath"
 )
-
-type flags struct {
-   content_id     string
-   intl           bool
-   representation string
-   e              internal.License
-   home           string
-}
 
 func (f *flags) New() error {
    var err error
@@ -37,8 +31,8 @@ func main() {
    flag.StringVar(&f.content_id, "b", "", "content ID")
    flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
    flag.StringVar(&f.representation, "i", "", "representation")
+   flag.BoolVar(&f.mullvad, "m", false, "Mullvad")
    flag.StringVar(&f.e.PrivateKey, "p", f.e.PrivateKey, "private key")
-   flag.BoolVar(&f.intl, "n", false, "intl")
    flag.Parse()
    switch {
    case f.content_id != "":
@@ -49,6 +43,23 @@ func main() {
    default:
       flag.Usage()
    }
+}
+
+type flags struct {
+   content_id     string
+   e              internal.License
+   home           string
+   mullvad        bool
+   representation string
+}
+
+func (f *flags) client() (*paramount.AppToken,) {
+   if f.mullvad {
+      var client http.Client
+      client.Transport = mullvad.Transport{}
+      return &client
+   }
+   return http.DefaultClient
 }
 
 // INTL does NOT allow anonymous key request, so if you are INTL you
@@ -63,16 +74,17 @@ func (f *flags) download() error {
       return f.e.Download(f.home, f.representation)
    }
    var token paramount.AppToken
-   if f.intl {
+   if f.mullvad {
       token = paramount.ComCbsCa
    } else {
       token = paramount.ComCbsApp
    }
-   item, err := token.Item(f.content_id)
+   client := f.client()
+   item, err := token.Item(f.content_id, client)
    if err != nil {
       return err
    }
-   resp, err := item.Mpd()
+   resp, err := item.Mpd(client)
    if err != nil {
       return err
    }
