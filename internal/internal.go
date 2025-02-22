@@ -19,168 +19,6 @@ import (
    "strings"
 )
 
-type Mpd func() (*http.Response, error)
-
-// try to get PSSH from DASH then MP4
-func Download(media Mpd, home string) error {
-   resp, err := media()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   var dash_mpd dash.Mpd
-   err = dash_mpd.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   dash_mpd.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(dash_mpd.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-const (
-   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
-   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-)
-
-var Forward = []struct {
-   Country string
-   Ip      string
-}{
-   {"Argentina", "186.128.0.0"},
-   {"Australia", "1.128.0.0"},
-   {"Bolivia", "179.58.0.0"},
-   {"Brazil", "179.192.0.0"},
-   {"Canada", "99.224.0.0"},
-   {"Chile", "191.112.0.0"},
-   {"Colombia", "181.128.0.0"},
-   {"Costa Rica", "201.192.0.0"},
-   {"Denmark", "2.104.0.0"},
-   {"Ecuador", "186.68.0.0"},
-   {"Egypt", "197.32.0.0"},
-   {"Germany", "53.0.0.0"},
-   {"Guatemala", "190.56.0.0"},
-   {"India", "106.192.0.0"},
-   {"Indonesia", "39.192.0.0"},
-   {"Ireland", "87.32.0.0"},
-   {"Italy", "79.0.0.0"},
-   {"Latvia", "78.84.0.0"},
-   {"Malaysia", "175.136.0.0"},
-   {"Mexico", "189.128.0.0"},
-   {"Netherlands", "145.160.0.0"},
-   {"New Zealand", "49.224.0.0"},
-   {"Norway", "88.88.0.0"},
-   {"Peru", "190.232.0.0"},
-   {"Russia", "95.24.0.0"},
-   {"South Africa", "105.0.0.0"},
-   {"South Korea", "175.192.0.0"},
-   {"Spain", "88.0.0.0"},
-   {"Sweden", "78.64.0.0"},
-   {"Taiwan", "120.96.0.0"},
-   {"United Kingdom", "25.0.0.0"},
-   {"Venezuela", "190.72.0.0"},
-}
-
-func get(u *url.URL, head http.Header) ([]byte, error) {
-   req := http.Request{URL: u}
-   if head != nil {
-      req.Header = head
-   } else {
-      req.Header = http.Header{}
-   }
-   resp, err := http.DefaultClient.Do(&req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   switch resp.StatusCode {
-   case http.StatusOK, http.StatusPartialContent:
-   default:
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
-}
-
-func write_file(name string, data []byte) error {
-   log.Println("WriteFile", name)
-   return os.WriteFile(name, data, os.ModePerm)
-}
-
-func write_segment(data, key []byte) ([]byte, error) {
-   if key == nil {
-      return data, nil
-   }
-   var file_file file.File
-   err := file_file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   track := file_file.Moof.Traf
-   if senc := track.Senc; senc != nil {
-      for i, data := range file_file.Mdat.Data(&track) {
-         err = senc.Sample[i].DecryptCenc(data, key)
-         if err != nil {
-            return nil, err
-         }
-      }
-   }
-   return file_file.Append(nil)
-}
-
-func create(name string) (*os.File, error) {
-   log.Println("Create", name)
-   return os.Create(name)
-}
-
-func dash_create(represent *dash.Representation) (*os.File, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return create(".m4a")
-   case "text/vtt":
-      return create(".vtt")
-   case "video/mp4":
-      return create(".m4v")
-   }
-   return nil, errors.New(*represent.MimeType)
-}
-
-type License struct {
-   ClientId string
-   PrivateKey string
-   Widevine func([]byte) ([]byte, error)
-}
-
 func (e *License) Download(home, id string) error {
    data, err := os.ReadFile(home + "/mpd_body")
    if err != nil {
@@ -509,4 +347,165 @@ func (h *header) initialization(data []byte) ([]byte, error) {
       }
    }
    return file_file.Append(nil)
+}
+type Mpd func() (*http.Response, error)
+
+// try to get PSSH from DASH then MP4
+func Download(media Mpd, home string) error {
+   resp, err := media()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   var dash_mpd dash.Mpd
+   err = dash_mpd.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   dash_mpd.Set(resp.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(dash_mpd.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
+const (
+   widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
+   widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+)
+
+var Forward = []struct {
+   Country string
+   Ip      string
+}{
+   {"Argentina", "186.128.0.0"},
+   {"Australia", "1.128.0.0"},
+   {"Bolivia", "179.58.0.0"},
+   {"Brazil", "179.192.0.0"},
+   {"Canada", "99.224.0.0"},
+   {"Chile", "191.112.0.0"},
+   {"Colombia", "181.128.0.0"},
+   {"Costa Rica", "201.192.0.0"},
+   {"Denmark", "2.104.0.0"},
+   {"Ecuador", "186.68.0.0"},
+   {"Egypt", "197.32.0.0"},
+   {"Germany", "53.0.0.0"},
+   {"Guatemala", "190.56.0.0"},
+   {"India", "106.192.0.0"},
+   {"Indonesia", "39.192.0.0"},
+   {"Ireland", "87.32.0.0"},
+   {"Italy", "79.0.0.0"},
+   {"Latvia", "78.84.0.0"},
+   {"Malaysia", "175.136.0.0"},
+   {"Mexico", "189.128.0.0"},
+   {"Netherlands", "145.160.0.0"},
+   {"New Zealand", "49.224.0.0"},
+   {"Norway", "88.88.0.0"},
+   {"Peru", "190.232.0.0"},
+   {"Russia", "95.24.0.0"},
+   {"South Africa", "105.0.0.0"},
+   {"South Korea", "175.192.0.0"},
+   {"Spain", "88.0.0.0"},
+   {"Sweden", "78.64.0.0"},
+   {"Taiwan", "120.96.0.0"},
+   {"United Kingdom", "25.0.0.0"},
+   {"Venezuela", "190.72.0.0"},
+}
+
+func get(u *url.URL, head http.Header) ([]byte, error) {
+   req := http.Request{URL: u}
+   if head != nil {
+      req.Header = head
+   } else {
+      req.Header = http.Header{}
+   }
+   resp, err := http.DefaultClient.Do(&req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   switch resp.StatusCode {
+   case http.StatusOK, http.StatusPartialContent:
+   default:
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func init() {
+   log.SetFlags(log.Ltime)
+   xhttp.Transport{}.DefaultClient()
+}
+
+func write_file(name string, data []byte) error {
+   log.Println("WriteFile", name)
+   return os.WriteFile(name, data, os.ModePerm)
+}
+
+func write_segment(data, key []byte) ([]byte, error) {
+   if key == nil {
+      return data, nil
+   }
+   var file_file file.File
+   err := file_file.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   track := file_file.Moof.Traf
+   if senc := track.Senc; senc != nil {
+      for i, data := range file_file.Mdat.Data(&track) {
+         err = senc.Sample[i].DecryptCenc(data, key)
+         if err != nil {
+            return nil, err
+         }
+      }
+   }
+   return file_file.Append(nil)
+}
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+func dash_create(represent *dash.Representation) (*os.File, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return create(".m4a")
+   case "text/vtt":
+      return create(".vtt")
+   case "video/mp4":
+      return create(".m4v")
+   }
+   return nil, errors.New(*represent.MimeType)
+}
+
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
 }

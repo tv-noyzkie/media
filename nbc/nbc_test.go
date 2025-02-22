@@ -14,6 +14,12 @@ var tests = []struct {
    key_id  string
 }{
    {
+      id:      3494500,
+      lock:    true,
+      program: "movie",
+      url:     "nbc.com/the-matrix/video/the-matrix/3494500",
+   },
+   {
       id:      9000283422,
       key_id:  "0552e44842654a4e81b326004be47be0",
       program: "episode",
@@ -25,13 +31,6 @@ var tests = []struct {
       lock:    true,
       program: "episode",
       url:     "nbc.com/saturday-night-live/video/march-30-ramy-youssef/9000283435",
-   },
-   {
-      id:      2957739,
-      key_id:  "e416811be8c44b8e9e598ea7b22e57cc",
-      lock:    true,
-      program: "movie",
-      url:     "nbc.com/2-fast-2-furious/video/2-fast-2-furious/2957739",
    },
 }
 

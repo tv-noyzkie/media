@@ -9,7 +9,7 @@ import (
 )
 
 type flags struct {
-   e internal.License
+   e              internal.License
    home           string
    nbc            int
    representation string
