@@ -26,18 +26,18 @@ type License struct {
 }
 
 // try to get PSSH from DASH then MP4
-func Download(mpd *http.Response, home string) error {
-   defer mpd.Body.Close()
-   data, err := io.ReadAll(mpd.Body)
+func Mpd(resp *http.Response, home string) error {
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
    if err != nil {
       return err
    }
-   var dash_mpd dash.Mpd
-   err = dash_mpd.Unmarshal(data)
+   var media dash.Mpd
+   err = media.Unmarshal(data)
    if err != nil {
       return err
    }
-   dash_mpd.Set(mpd.Request.URL)
+   media.Set(resp.Request.URL)
    err = write_file(home+"/mpd_body", data)
    if err != nil {
       return err
@@ -47,8 +47,8 @@ func Download(mpd *http.Response, home string) error {
       return err
    }
    defer os_file.Close()
-   fmt.Fprint(os_file, mpd.Request.URL)
-   represents := slices.SortedFunc(dash_mpd.Representation(),
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(media.Representation(),
       func(a, b dash.Representation) int {
          return a.Bandwidth - b.Bandwidth
       },

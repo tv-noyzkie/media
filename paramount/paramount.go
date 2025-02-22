@@ -39,67 +39,9 @@ func cms_account(id string) int64 {
    return int64(i)
 }
 
-type AppToken struct {
-   AppSecret string
-   SecretKey string
-}
-
 type SessionToken struct {
    LsSession string `json:"ls_session"`
    Url string
-}
-
-type Item struct {
-   AssetType string
-   CmsAccountId string
-   ContentId string
-}
-
-// must use app token and IP address for correct location
-func (Item) Marshal(token *AppToken, cid string) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
-   req.URL.Path = func() string {
-      var b strings.Builder
-      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
-      b.WriteString(cid)
-      b.WriteString(".json")
-      return b.String()
-   }()
-   token1, err := token.encode()
-   if err != nil {
-      return nil, err
-   }
-   req.URL.RawQuery = url.Values{"at": {token1}}.Encode()
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-func (i *Item) Unmarshal(data []byte) error {
-   var value struct {
-      Error string
-      ItemList []Item
-   }
-   err := json.Unmarshal(data, &value)
-   if err != nil {
-      return err
-   }
-   if value.Error != "" {
-      return errors.New(value.Error)
-   }
-   if len(value.ItemList) == 0 {
-      return errors.New("item list length is zero")
-   }
-   *i = value.ItemList[0]
-   return nil
 }
 
 // 15.0.52
@@ -169,23 +111,10 @@ func (a *AppToken) Session(content_id string) (*SessionToken, error) {
    return session, nil
 }
 
-// hard geo block
-func (i *Item) Mpd() (*http.Response, error) {
-   req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/s/")
-      b = append(b, i.CmsAccountId...)
-      b = append(b, "/media/guid/"...)
-      b = strconv.AppendInt(b, cms_account(i.CmsAccountId), 10)
-      b = append(b, '/')
-      b = append(b, i.ContentId...)
-      return string(b)
-   }()
-   req.URL.RawQuery = url.Values{
-      "assetTypes": {i.AssetType},
-      "formats": {"MPEG-DASH"},
-   }.Encode()
-   return http.DefaultClient.Do(req)
+type Item struct {
+   AssetType string
+   CmsAccountId string
+   ContentId string
 }
 
 func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
@@ -205,4 +134,62 @@ func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
       defer resp.Body.Close()
       return io.ReadAll(resp.Body)
    }
+}
+
+type AppToken struct {
+   AppSecret string
+   SecretKey string
+}
+
+// must use app token and IP address for correct location
+func (a *AppToken) Item(cid string) (*Item, error) {
+   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
+   req.URL.Path = func() string {
+      var b strings.Builder
+      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
+      b.WriteString(cid)
+      b.WriteString(".json")
+      return b.String()
+   }()
+   token1, err := a.encode()
+   if err != nil {
+      return nil, err
+   }
+   req.URL.RawQuery = url.Values{"at": {token1}}.Encode()
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   var value struct {
+      Error string
+      ItemList []Item
+   }
+   err = json.NewDecoder(resp.Body).Decode(&value)
+   if err != nil {
+      return nil, err
+   }
+   if value.Error != "" {
+      return nil, errors.New(value.Error)
+   }
+   return &value.ItemList[0], nil
+}
+
+// hard geo block
+func (i *Item) Mpd() (*http.Response, error) {
+   req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/s/")
+      b = append(b, i.CmsAccountId...)
+      b = append(b, "/media/guid/"...)
+      b = strconv.AppendInt(b, cms_account(i.CmsAccountId), 10)
+      b = append(b, '/')
+      b = append(b, i.ContentId...)
+      return string(b)
+   }()
+   req.URL.RawQuery = url.Values{
+      "assetTypes": {i.AssetType},
+      "formats": {"MPEG-DASH"},
+   }.Encode()
+   return http.DefaultClient.Do(req)
 }
