@@ -76,6 +76,12 @@ func (a *AppToken) encode() (string, error) {
    return base64.StdEncoding.EncodeToString(data1), nil
 }
 
+type Item struct {
+   AssetType string
+   CmsAccountId string
+   ContentId string
+}
+
 // must use app token and IP address for US
 func (a *AppToken) Session(content_id string) (*SessionToken, error) {
    req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
@@ -109,12 +115,6 @@ func (a *AppToken) Session(content_id string) (*SessionToken, error) {
       return nil, err
    }
    return session, nil
-}
-
-type Item struct {
-   AssetType string
-   CmsAccountId string
-   ContentId string
 }
 
 func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
@@ -151,11 +151,11 @@ func (a *AppToken) Item(cid string) (*Item, error) {
       b.WriteString(".json")
       return b.String()
    }()
-   token1, err := a.encode()
+   token, err := a.encode()
    if err != nil {
       return nil, err
    }
-   req.URL.RawQuery = url.Values{"at": {token1}}.Encode()
+   req.URL.RawQuery = url.Values{"at": {token}}.Encode()
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
@@ -175,7 +175,7 @@ func (a *AppToken) Item(cid string) (*Item, error) {
    return &value.ItemList[0], nil
 }
 
-// hard geo block
+// must use IP address for correct location
 func (i *Item) Mpd() (*http.Response, error) {
    req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
    req.URL.Path = func() string {

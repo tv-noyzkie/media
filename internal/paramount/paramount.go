@@ -24,7 +24,7 @@ func (f *flags) New() error {
    }
    f.home = filepath.ToSlash(f.home) + "/media"
    f.e.ClientId = f.home + "/client_id.bin"
-   f.e.PrivateKey = f.home + "/widevine/private_key.pem"
+   f.e.PrivateKey = f.home + "/private_key.pem"
    return nil
 }
 

@@ -13,10 +13,9 @@ var tests = []struct{
    url string
 }{
    {
-      content_id: "wjQ4RChi6BHHu4MVTncppVuCwu44uq2Q",
-      key_id: "twwHMCIoRtaIS+/clhhs9A==",
+      content_id: "tOeI0WHG3icuPhCk5nkLXNmi5c4Jfx41",
       location: []string{"US"},
-      url: "paramountplus.com/movies/video/wjQ4RChi6BHHu4MVTncppVuCwu44uq2Q",
+      url: "paramountplus.com/movies/video/tOeI0WHG3icuPhCk5nkLXNmi5c4Jfx41",
    },
    {
       content_id: "esJvFlqdrcS_kFHnpxSuYp449E7tTexD",
