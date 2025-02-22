@@ -19,71 +19,6 @@ import (
    "strings"
 )
 
-func create_file(represent *dash.Representation) (*os.File, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return create(".m4a")
-   case "text/vtt":
-      return create(".vtt")
-   case "video/mp4":
-      return create(".m4v")
-   }
-   return nil, errors.New(*represent.MimeType)
-}
-
-func (h *header) New(represent *dash.Representation) error {
-   for _, content := range represent.ContentProtection {
-      if content.SchemeIdUri == widevine_urn {
-         if content.Pssh != "" {
-            data, err := base64.StdEncoding.DecodeString(content.Pssh)
-            if err != nil {
-               return err
-            }
-            var box pssh.Box
-            n, err := box.BoxHeader.Decode(data)
-            if err != nil {
-               return err
-            }
-            err = box.Read(data[n:])
-            if err != nil {
-               return err
-            }
-            h.pssh = box.Data
-            break
-         }
-      }
-   }
-   return nil
-}
-
-// RECEIVER CANNOT BE NIL
-func (h *header) initialization(data []byte) ([]byte, error) {
-   var file_file file.File
-   err := file_file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   if moov, ok := file_file.GetMoov(); ok {
-      for _, pssh1 := range moov.Pssh {
-         if pssh1.SystemId.String() == widevine_system_id {
-            h.pssh = pssh1.Data
-         }
-         copy(pssh1.BoxHeader.Type[:], "free") // Firefox
-      }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         h.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
-      }
-   }
-   return file_file.Append(nil)
-}
-
 const (
    widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
@@ -159,11 +94,6 @@ func write_file(name string, data []byte) error {
    return os.WriteFile(name, data, os.ModePerm)
 }
 
-func create(name string) (*os.File, error) {
-   log.Println("Create", name)
-   return os.Create(name)
-}
-
 func write_segment(data, key []byte) ([]byte, error) {
    if key == nil {
       return data, nil
@@ -183,6 +113,23 @@ func write_segment(data, key []byte) ([]byte, error) {
       }
    }
    return file_file.Append(nil)
+}
+
+func create(name string) (*os.File, error) {
+   log.Println("Create", name)
+   return os.Create(name)
+}
+
+func dash_create(represent *dash.Representation) (*os.File, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return create(".m4a")
+   case "text/vtt":
+      return create(".vtt")
+   case "video/mp4":
+      return create(".m4v")
+   }
+   return nil, errors.New(*represent.MimeType)
 }
 
 func (e *License) get_key(head *header) ([]byte, error) {
@@ -280,47 +227,13 @@ func (e *License) Print(home string, media Mpd) error {
    return nil
 }
 
-func (e *License) Download(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == id {
-         if represent.SegmentBase != nil {
-            return e.segment_base(&represent)
-         }
-         if represent.SegmentList != nil {
-            return e.segment_list(&represent)
-         }
-         return e.segment_template(&represent)
-      }
-   }
-   return nil
-}
-
 func (e *License) segment_template(represent *dash.Representation) error {
    var head header
    err := head.New(represent)
    if err != nil {
       return err
    }
-   os_file, err := create_file(represent)
+   os_file, err := dash_create(represent)
    if err != nil {
       return err
    }
@@ -382,7 +295,7 @@ func (e *License) segment_base(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   os_file, err := create_file(represent)
+   os_file, err := dash_create(represent)
    if err != nil {
       return err
    }
@@ -448,7 +361,7 @@ func (e *License) segment_list(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   os_file, err := create_file(represent)
+   os_file, err := dash_create(represent)
    if err != nil {
       return err
    }
@@ -498,15 +411,102 @@ func (e *License) segment_list(represent *dash.Representation) error {
    return nil
 }
 
-type header struct {
-   key_id []byte
-   pssh   []byte
-}
-
 type License struct {
    ClientId string
    PrivateKey string
    Widevine func([]byte) ([]byte, error)
 }
 
+func (e *License) Download(home, id string) error {
+   data, err := os.ReadFile(home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = os.ReadFile(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         if represent.SegmentBase != nil {
+            return e.segment_base(&represent)
+         }
+         if represent.SegmentList != nil {
+            return e.segment_list(&represent)
+         }
+         return e.segment_template(&represent)
+      }
+   }
+   return nil
+}
+
 type Mpd func() (*http.Response, error)
+
+type header struct {
+   key_id []byte
+   pssh   []byte
+}
+
+func (h *header) New(represent *dash.Representation) error {
+   for _, content := range represent.ContentProtection {
+      if content.SchemeIdUri == widevine_urn {
+         if content.Pssh != "" {
+            data, err := base64.StdEncoding.DecodeString(content.Pssh)
+            if err != nil {
+               return err
+            }
+            var box pssh.Box
+            n, err := box.BoxHeader.Decode(data)
+            if err != nil {
+               return err
+            }
+            err = box.Read(data[n:])
+            if err != nil {
+               return err
+            }
+            h.pssh = box.Data
+            break
+         }
+      }
+   }
+   return nil
+}
+
+// RECEIVER CANNOT BE NIL
+func (h *header) initialization(data []byte) ([]byte, error) {
+   var file_file file.File
+   err := file_file.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   if moov, ok := file_file.GetMoov(); ok {
+      for _, pssh1 := range moov.Pssh {
+         if pssh1.SystemId.String() == widevine_system_id {
+            h.pssh = pssh1.Data
+         }
+         copy(pssh1.BoxHeader.Type[:], "free") // Firefox
+      }
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         h.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
+      }
+   }
+   return file_file.Append(nil)
+}
