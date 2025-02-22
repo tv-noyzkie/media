@@ -19,6 +19,49 @@ import (
    "strings"
 )
 
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
+}
+
+// try to get PSSH from DASH then MP4
+func Download(mpd *http.Response, home string) error {
+   defer mpd.Body.Close()
+   data, err := io.ReadAll(mpd.Body)
+   if err != nil {
+      return err
+   }
+   var dash_mpd dash.Mpd
+   err = dash_mpd.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   dash_mpd.Set(mpd.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, mpd.Request.URL)
+   represents := slices.SortedFunc(dash_mpd.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
 func (e *License) Download(home, id string) error {
    data, err := os.ReadFile(home + "/mpd_body")
    if err != nil {
@@ -348,48 +391,6 @@ func (h *header) initialization(data []byte) ([]byte, error) {
    }
    return file_file.Append(nil)
 }
-type Mpd func() (*http.Response, error)
-
-// try to get PSSH from DASH then MP4
-func Download(media Mpd, home string) error {
-   resp, err := media()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   var dash_mpd dash.Mpd
-   err = dash_mpd.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   dash_mpd.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(dash_mpd.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
 
 const (
    widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
@@ -502,10 +503,4 @@ func dash_create(represent *dash.Representation) (*os.File, error) {
       return create(".m4v")
    }
    return nil, errors.New(*represent.MimeType)
-}
-
-type License struct {
-   ClientId string
-   PrivateKey string
-   Widevine func([]byte) ([]byte, error)
 }

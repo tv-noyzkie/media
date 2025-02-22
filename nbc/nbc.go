@@ -15,6 +15,43 @@ import (
    "time"
 )
 
+func (v Vod) Mpd() (*http.Response, error) {
+   return http.Get(v.PlaybackUrl)
+}
+
+type Vod struct {
+   PlaybackUrl string
+}
+
+func Widevine(data []byte) ([]byte, error) {
+   time1 := fmt.Sprint(time.Now().UnixMilli())
+   hash := func() string {
+      hash1 := hmac.New(sha256.New, []byte(drm_proxy_secret))
+      fmt.Fprint(hash1, time1, "widevine")
+      return fmt.Sprintf("%x", hash1.Sum(nil))
+   }()
+   req, err := http.NewRequest(
+      "POST", "https://drmproxy.digitalsvc.apps.nbcuni.com",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.URL.Path = "/drm-proxy/license/widevine"
+   req.URL.RawQuery = url.Values{
+      "device": {"web"},
+      "hash":   {hash},
+      "time":   {time1},
+   }.Encode()
+   req.Header.Set("content-type", "application/octet-stream")
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (m *Metadata) Vod() (*Vod, error) {
    req, _ := http.NewRequest("", "https://lemonade.nbc.com", nil)
    req.URL.Path = func() string {
@@ -128,42 +165,3 @@ func graphql_compact(data string) string {
 }
 
 const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
-
-type Vod struct {
-   PlaybackUrl string
-}
-
-func (v Vod) Mpd() func() (*http.Response, error) {
-   return func() (*http.Response, error) {
-      return http.Get(v.PlaybackUrl)
-   }
-}
-
-func Widevine(data []byte) ([]byte, error) {
-   time1 := fmt.Sprint(time.Now().UnixMilli())
-   hash := func() string {
-      hash1 := hmac.New(sha256.New, []byte(drm_proxy_secret))
-      fmt.Fprint(hash1, time1, "widevine")
-      return fmt.Sprintf("%x", hash1.Sum(nil))
-   }()
-   req, err := http.NewRequest(
-      "POST", "https://drmproxy.digitalsvc.apps.nbcuni.com",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.URL.Path = "/drm-proxy/license/widevine"
-   req.URL.RawQuery = url.Values{
-      "device": {"web"},
-      "hash":   {hash},
-      "time":   {time1},
-   }.Encode()
-   req.Header.Set("content-type", "application/octet-stream")
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}

@@ -62,5 +62,9 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   return internal.Download(vod.Mpd(), f.home)
+   mpd, err := vod.Mpd()
+   if err != nil {
+      return err
+   }
+   return internal.Download(mpd, f.home)
 }

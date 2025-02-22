@@ -169,23 +169,6 @@ func (a *AppToken) Session(content_id string) (*SessionToken, error) {
    return session, nil
 }
 
-func (s *SessionToken) License(data []byte) ([]byte, error) {
-   req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "authorization": {"Bearer " + s.LsSession},
-      "content-type": {"application/x-protobuf"},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
 // hard geo block
 func (i *Item) Mpd() (*http.Response, error) {
    req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
@@ -203,4 +186,23 @@ func (i *Item) Mpd() (*http.Response, error) {
       "formats": {"MPEG-DASH"},
    }.Encode()
    return http.DefaultClient.Do(req)
+}
+
+func (s *SessionToken) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
+      if err != nil {
+         return nil, err
+      }
+      req.Header = http.Header{
+         "authorization": {"Bearer " + s.LsSession},
+         "content-type": {"application/x-protobuf"},
+      }
+      resp, err := http.DefaultClient.Do(req)
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
+   }
 }
