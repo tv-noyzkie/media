@@ -15,14 +15,6 @@ import (
    "time"
 )
 
-func (v Vod) Mpd() (*http.Response, error) {
-   return http.Get(v.PlaybackUrl)
-}
-
-type Vod struct {
-   PlaybackUrl string
-}
-
 func (m *Metadata) Vod() (*Vod, error) {
    req, _ := http.NewRequest("", "https://lemonade.nbc.com", nil)
    req.URL.Path = func() string {
@@ -137,21 +129,23 @@ func graphql_compact(data string) string {
 
 const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
 
-type Client struct {
-   Time string
-   Hash string
+type Vod struct {
+   PlaybackUrl string
 }
 
-func (c *Client) New() {
-   c.Time = fmt.Sprint(time.Now().UnixMilli())
-   c.Hash = func() string {
-      hash := hmac.New(sha256.New, []byte(drm_proxy_secret))
-      fmt.Fprint(hash, c.Time, "widevine")
-      return fmt.Sprintf("%x", hash.Sum(nil))
+func (v Vod) Mpd() func() (*http.Response, error) {
+   return func() (*http.Response, error) {
+      return http.Get(v.PlaybackUrl)
+   }
+}
+
+func Widevine(data []byte) ([]byte, error) {
+   time1 := fmt.Sprint(time.Now().UnixMilli())
+   hash := func() string {
+      hash1 := hmac.New(sha256.New, []byte(drm_proxy_secret))
+      fmt.Fprint(hash1, time1, "widevine")
+      return fmt.Sprintf("%x", hash1.Sum(nil))
    }()
-}
-
-func (c *Client) License(data []byte) ([]byte, error) {
    req, err := http.NewRequest(
       "POST", "https://drmproxy.digitalsvc.apps.nbcuni.com",
       bytes.NewReader(data),
@@ -162,8 +156,8 @@ func (c *Client) License(data []byte) ([]byte, error) {
    req.URL.Path = "/drm-proxy/license/widevine"
    req.URL.RawQuery = url.Values{
       "device": {"web"},
-      "hash":   {c.Hash},
-      "time":   {c.Time},
+      "hash":   {hash},
+      "time":   {time1},
    }.Encode()
    req.Header.Set("content-type", "application/octet-stream")
    resp, err := http.DefaultClient.Do(req)

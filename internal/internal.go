@@ -132,6 +132,87 @@ func dash_create(represent *dash.Representation) (*os.File, error) {
    return nil, errors.New(*represent.MimeType)
 }
 
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
+}
+
+func (e *License) Download(home, id string) error {
+   data, err := os.ReadFile(home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = os.ReadFile(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         if represent.SegmentBase != nil {
+            return e.segment_base(&represent)
+         }
+         if represent.SegmentList != nil {
+            return e.segment_list(&represent)
+         }
+         return e.segment_template(&represent)
+      }
+   }
+   return nil
+}
+
+// try to get PSSH from DASH then MP4
+func (e *License) Print(home string, media Mpd) error {
+   resp, err := media()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   var dash_mpd dash.Mpd
+   err = dash_mpd.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   dash_mpd.Set(resp.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(dash_mpd.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
 func (e *License) get_key(head *header) ([]byte, error) {
    if head.key_id == nil {
       return nil, nil
@@ -184,47 +265,6 @@ func (e *License) get_key(head *header) ([]byte, error) {
          return key, nil
       }
    }
-}
-
-// try to get PSSH from DASH then MP4
-func (e *License) Print(home string, media Mpd) error {
-   resp, err := media()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   var dash_mpd dash.Mpd
-   err = dash_mpd.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   dash_mpd.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(dash_mpd.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
 }
 
 func (e *License) segment_template(represent *dash.Representation) error {
@@ -406,46 +446,6 @@ func (e *License) segment_list(represent *dash.Representation) error {
       _, err = os_file.Write(data)
       if err != nil {
          return err
-      }
-   }
-   return nil
-}
-
-type License struct {
-   ClientId string
-   PrivateKey string
-   Widevine func([]byte) ([]byte, error)
-}
-
-func (e *License) Download(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == id {
-         if represent.SegmentBase != nil {
-            return e.segment_base(&represent)
-         }
-         if represent.SegmentList != nil {
-            return e.segment_list(&represent)
-         }
-         return e.segment_template(&represent)
       }
    }
    return nil
