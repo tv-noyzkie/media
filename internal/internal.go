@@ -19,6 +19,71 @@ import (
    "strings"
 )
 
+func create_file(represent *dash.Representation) (*os.File, error) {
+   switch *represent.MimeType {
+   case "audio/mp4":
+      return create(".m4a")
+   case "text/vtt":
+      return create(".vtt")
+   case "video/mp4":
+      return create(".m4v")
+   }
+   return nil, errors.New(*represent.MimeType)
+}
+
+func (h *header) New(represent *dash.Representation) error {
+   for _, content := range represent.ContentProtection {
+      if content.SchemeIdUri == widevine_urn {
+         if content.Pssh != "" {
+            data, err := base64.StdEncoding.DecodeString(content.Pssh)
+            if err != nil {
+               return err
+            }
+            var box pssh.Box
+            n, err := box.BoxHeader.Decode(data)
+            if err != nil {
+               return err
+            }
+            err = box.Read(data[n:])
+            if err != nil {
+               return err
+            }
+            h.pssh = box.Data
+            break
+         }
+      }
+   }
+   return nil
+}
+
+// RECEIVER CANNOT BE NIL
+func (h *header) initialization(data []byte) ([]byte, error) {
+   var file_file file.File
+   err := file_file.Read(data)
+   if err != nil {
+      return nil, err
+   }
+   if moov, ok := file_file.GetMoov(); ok {
+      for _, pssh1 := range moov.Pssh {
+         if pssh1.SystemId.String() == widevine_system_id {
+            h.pssh = pssh1.Data
+         }
+         copy(pssh1.BoxHeader.Type[:], "free") // Firefox
+      }
+      description := moov.Trak.Mdia.Minf.Stbl.Stsd
+      if sinf, ok := description.Sinf(); ok {
+         h.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         // Firefox
+         copy(sinf.BoxHeader.Type[:], "free")
+         if sample, ok := description.SampleEntry(); ok {
+            // Firefox
+            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
+         }
+      }
+   }
+   return file_file.Append(nil)
+}
+
 const (
    widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
@@ -120,46 +185,156 @@ func write_segment(data, key []byte) ([]byte, error) {
    return file_file.Append(nil)
 }
 
-func get_file(represent *dash.Representation) (*os.File, error) {
-   switch *represent.MimeType {
-   case "audio/mp4":
-      return create(".m4a")
-   case "text/vtt":
-      return create(".vtt")
-   case "video/mp4":
-      return create(".m4v")
+func (e *License) get_key(head *header) ([]byte, error) {
+   if head.key_id == nil {
+      return nil, nil
    }
-   return nil, errors.New(*represent.MimeType)
+   private_key, err := os.ReadFile(e.PrivateKey)
+   if err != nil {
+      return nil, err
+   }
+   client_id, err := os.ReadFile(e.ClientId)
+   if err != nil {
+      return nil, err
+   }
+   if head.pssh == nil {
+      var pssh1 widevine.Pssh
+      pssh1.KeyIds = [][]byte{head.key_id}
+      head.pssh = pssh1.Marshal()
+   }
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(head.pssh))
+   var module widevine.Cdm
+   err = module.New(private_key, client_id, head.pssh)
+   if err != nil {
+      return nil, err
+   }
+   data, err := module.RequestBody()
+   if err != nil {
+      return nil, err
+   }
+   data, err = e.Widevine(data)
+   if err != nil {
+      return nil, err
+   }
+   var body widevine.ResponseBody
+   err = body.Unmarshal(data)
+   if err != nil {
+      return nil, err
+   }
+   block, err := module.Block(body)
+   if err != nil {
+      return nil, err
+   }
+   containers := body.Container()
+   for {
+      container, ok := containers()
+      if !ok {
+         return nil, errors.New("ResponseBody.Container")
+      }
+      if bytes.Equal(container.Id(), head.key_id) {
+         key := container.Key(block)
+         log.Println("key", base64.StdEncoding.EncodeToString(key))
+         return key, nil
+      }
+   }
 }
 
-type DashClient interface {
-   Dash() (*http.Response, error)
+// try to get PSSH from DASH then MP4
+func (e *License) Print(home string, media Mpd) error {
+   resp, err := media()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   var dash_mpd dash.Mpd
+   err = dash_mpd.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   dash_mpd.Set(resp.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(dash_mpd.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
 }
 
-type TypeZero struct {
-   client WidevineClient
-   client_id string
-   private_key string
+func (e *License) Download(home, id string) error {
+   data, err := os.ReadFile(home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = os.ReadFile(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         if represent.SegmentBase != nil {
+            return e.segment_base(&represent)
+         }
+         if represent.SegmentList != nil {
+            return e.segment_list(&represent)
+         }
+         return e.segment_template(&represent)
+      }
+   }
+   return nil
 }
 
-func (t *TypeZero) segment_template(
-   one *type_one, represent *dash.Representation,
-) error {
-   os_file, err := get_file(represent)
+func (e *License) segment_template(represent *dash.Representation) error {
+   var head header
+   err := head.New(represent)
+   if err != nil {
+      return err
+   }
+   os_file, err := create_file(represent)
    if err != nil {
       return err
    }
    defer os_file.Close()
    if initial := represent.SegmentTemplate.Initialization; initial != "" {
-      address, err := initial.Url(represent)
+      initial2, err := initial.Url(represent)
       if err != nil {
          return err
       }
-      data, err := get(address, nil)
+      data, err := get(initial2, nil)
       if err != nil {
          return err
       }
-      data, err = one.initialization(data)
+      data, err = head.initialization(data)
       if err != nil {
          return err
       }
@@ -168,14 +343,14 @@ func (t *TypeZero) segment_template(
          return err
       }
    }
-   key, err := t.get_key(one)
+   key, err := e.get_key(&head)
    if err != nil {
       return err
    }
    http.DefaultClient.Transport = nil
    var segments []int
-   for r := range represent.Representation() {
-      segments = slices.AppendSeq(segments, r.Segment())
+   for represent1 := range represent.Representation() {
+      segments = slices.AppendSeq(segments, represent1.Segment())
    }
    var progress xhttp.ProgressParts
    progress.Set(len(segments))
@@ -201,10 +376,13 @@ func (t *TypeZero) segment_template(
    return nil
 }
 
-func (t *TypeZero) segment_base(
-   one *type_one, represent *dash.Representation,
-) error {
-   os_file, err := get_file(represent)
+func (e *License) segment_base(represent *dash.Representation) error {
+   var head header
+   err := head.New(represent)
+   if err != nil {
+      return err
+   }
+   os_file, err := create_file(represent)
    if err != nil {
       return err
    }
@@ -216,7 +394,7 @@ func (t *TypeZero) segment_base(
    if err != nil {
       return err
    }
-   data, err = one.initialization(data)
+   data, err = head.initialization(data)
    if err != nil {
       return err
    }
@@ -224,7 +402,7 @@ func (t *TypeZero) segment_base(
    if err != nil {
       return err
    }
-   key, err := t.get_key(one)
+   key, err := e.get_key(&head)
    if err != nil {
       return err
    }
@@ -264,10 +442,13 @@ func (t *TypeZero) segment_base(
    return nil
 }
 
-func (t *TypeZero) segment_list(
-   one *type_one, represent *dash.Representation,
-) error {
-   os_file, err := get_file(represent)
+func (e *License) segment_list(represent *dash.Representation) error {
+   var head header
+   err := head.New(represent)
+   if err != nil {
+      return err
+   }
+   os_file, err := create_file(represent)
    if err != nil {
       return err
    }
@@ -280,7 +461,7 @@ func (t *TypeZero) segment_list(
    if err != nil {
       return err
    }
-   data, err = one.initialization(data)
+   data, err = head.initialization(data)
    if err != nil {
       return err
    }
@@ -288,7 +469,7 @@ func (t *TypeZero) segment_list(
    if err != nil {
       return err
    }
-   key, err := t.get_key(one)
+   key, err := e.get_key(&head)
    if err != nil {
       return err
    }
@@ -317,193 +498,15 @@ func (t *TypeZero) segment_list(
    return nil
 }
 
-func (t *TypeZero) get_key(one *type_one) ([]byte, error) {
-   if one.key_id == nil {
-      return nil, nil
-   }
-   private_key1, err := os.ReadFile(t.private_key)
-   if err != nil {
-      return nil, err
-   }
-   client_id1, err := os.ReadFile(t.client_id)
-   if err != nil {
-      return nil, err
-   }
-   if one.pssh == nil {
-      var pssh widevine.Pssh
-      pssh.KeyIds = [][]byte{one.key_id}
-      one.pssh = pssh.Marshal()
-   }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(one.pssh))
-   var module widevine.Cdm
-   err = module.New(private_key1, client_id1, one.pssh)
-   if err != nil {
-      return nil, err
-   }
-   data, err := module.RequestBody()
-   if err != nil {
-      return nil, err
-   }
-   data, err = t.client.Widevine(data)
-   if err != nil {
-      return nil, err
-   }
-   var body widevine.ResponseBody
-   err = body.Unmarshal(data)
-   if err != nil {
-      return nil, err
-   }
-   block, err := module.Block(body)
-   if err != nil {
-      return nil, err
-   }
-   containers := body.Container()
-   for {
-      container, ok := containers()
-      if !ok {
-         return nil, errors.New("ResponseBody.Container")
-      }
-      if bytes.Equal(container.Id(), one.key_id) {
-         key := container.Key(block)
-         log.Println("key", base64.StdEncoding.EncodeToString(key))
-         return key, nil
-      }
-   }
-}
-
-// try to get PSSH from DASH then MP4
-func (t *TypeZero) MethodZero(home string, client DashClient) error {
-   var media dash.Mpd
-   resp, err := client.Dash()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   media.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-func (t *TypeZero) MethodOne(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id != id {
-         continue
-      }
-      var one type_one
-      for _, protect := range represent.ContentProtection {
-         if protect.SchemeIdUri != widevine_urn {
-            continue
-         }
-         if protect.Pssh == "" {
-            continue
-         }
-         data, err := base64.StdEncoding.DecodeString(protect.Pssh)
-         if err != nil {
-            return err
-         }
-         var box pssh.Box
-         n, err := box.BoxHeader.Decode(data)
-         if err != nil {
-            return err
-         }
-         err = box.Read(data[n:])
-         if err != nil {
-            return err
-         }
-         one.pssh = box.Data
-         break
-      }
-      if represent.SegmentBase != nil {
-         return t.segment_base(&one, &represent)
-      }
-      if represent.SegmentList != nil {
-         return t.segment_list(&one, &represent)
-      }
-      return t.segment_template(&one, &represent)
-   }
-   return nil
-}
-
-type WidevineClient interface {
-   Widevine([]byte) ([]byte, error)
-}
-
-// RECEIVER CANNOT BE NIL
-func (one *type_one) initialization(data []byte) ([]byte, error) {
-   var file_file file.File
-   err := file_file.Read(data)
-   if err != nil {
-      return nil, err
-   }
-   if moov, ok := file_file.GetMoov(); ok {
-      for _, pssh := range moov.Pssh {
-         if pssh.SystemId.String() == widevine_system_id {
-            one.pssh = pssh.Data
-         }
-         copy(pssh.BoxHeader.Type[:], "free") // Firefox
-      }
-      description := moov.Trak.Mdia.Minf.Stbl.Stsd
-      if sinf, ok := description.Sinf(); ok {
-         one.key_id = sinf.Schi.Tenc.DefaultKid[:]
-         // Firefox
-         copy(sinf.BoxHeader.Type[:], "free")
-         if sample, ok := description.SampleEntry(); ok {
-            // Firefox
-            copy(sample.BoxHeader.Type[:], sinf.Frma.DataFormat[:])
-         }
-      }
-   }
-   return file_file.Append(nil)
-}
-
-type type_one struct {
+type header struct {
    key_id []byte
    pssh   []byte
 }
+
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
+}
+
+type Mpd func() (*http.Response, error)
