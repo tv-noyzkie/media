@@ -19,6 +19,49 @@ import (
    "strings"
 )
 
+type Mpd func() (*http.Response, error)
+
+// try to get PSSH from DASH then MP4
+func Download(media Mpd, home string) error {
+   resp, err := media()
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   var dash_mpd dash.Mpd
+   err = dash_mpd.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   dash_mpd.Set(resp.Request.URL)
+   err = write_file(home+"/mpd_body", data)
+   if err != nil {
+      return err
+   }
+   os_file, err := create(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   defer os_file.Close()
+   fmt.Fprint(os_file, resp.Request.URL)
+   represents := slices.SortedFunc(dash_mpd.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
+   }
+   return nil
+}
+
 const (
    widevine_system_id = "edef8ba979d64acea3c827dcd51d21ed"
    widevine_urn       = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
@@ -168,47 +211,6 @@ func (e *License) Download(home, id string) error {
          }
          return e.segment_template(&represent)
       }
-   }
-   return nil
-}
-
-// try to get PSSH from DASH then MP4
-func (e *License) Print(home string, media Mpd) error {
-   resp, err := media()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   var dash_mpd dash.Mpd
-   err = dash_mpd.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   dash_mpd.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
-   represents := slices.SortedFunc(dash_mpd.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
    }
    return nil
 }
@@ -450,8 +452,6 @@ func (e *License) segment_list(represent *dash.Representation) error {
    }
    return nil
 }
-
-type Mpd func() (*http.Response, error)
 
 type header struct {
    key_id []byte

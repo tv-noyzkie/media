@@ -3,13 +3,56 @@ package main
 import (
    "41.neocities.org/media/internal"
    "41.neocities.org/media/nbc"
-   "fmt"
-   "io"
-   "net/url"
+   "flag"
    "os"
+   "path/filepath"
 )
 
-func (f *flags) do_print() error {
+type flags struct {
+   e internal.License
+   home           string
+   nbc            int
+   representation string
+}
+
+func (f *flags) New() error {
+   var err error
+   f.home, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.home = filepath.ToSlash(f.home) + "/media"
+   f.e.ClientId = f.home + "/client_id.bin"
+   f.e.PrivateKey = f.home + "/private_key.pem"
+   return nil
+}
+
+func main() {
+   var f flags
+   err := f.New()
+   if err != nil {
+      panic(err)
+   }
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.e.PrivateKey, "p", f.e.PrivateKey, "private key")
+   flag.StringVar(&f.representation, "i", "", "representation")
+   flag.IntVar(&f.nbc, "b", 0, "NBC ID")
+   flag.Parse()
+   if f.nbc >= 1 {
+      err := f.download()
+      if err != nil {
+         panic(err)
+      }
+   } else {
+      flag.Usage()
+   }
+}
+
+func (f *flags) download() error {
+   if f.representation != "" {
+      f.e.Widevine = nbc.Widevine
+      return f.e.Download(f.home, f.representation)
+   }
    var metadata nbc.Metadata
    err := metadata.New(f.nbc)
    if err != nil {
@@ -19,45 +62,5 @@ func (f *flags) do_print() error {
    if err != nil {
       return err
    }
-   //////////////////////////////////////////////////////////////////////////////
-   resp, err := vod.Mpd()
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   body, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return err
-   }
-   internal.WriteFile(f.home + "/mpd_body", body)
-   file, err := internal.Create(f.home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   fmt.Fprint(file, resp.Request.URL)
-   return f.s.Download(resp.Request.URL, body, "")
-   //////////////////////////////////////////////////////////////////////////////
-}
-
-func (f *flags) do_download() error {
-   var client nbc.Client
-   client.New()
-   f.s.Client = &client
-   //////////////////////////////////////////////////////////////////////////////
-   data, err := os.ReadFile(f.home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   body, err := os.ReadFile(f.home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   return f.s.Download(&base, body, f.representation)
-   //////////////////////////////////////////////////////////////////////////////
+   return internal.Download(vod.Mpd(), f.home)
 }
