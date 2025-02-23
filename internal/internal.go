@@ -19,13 +19,6 @@ import (
    "strings"
 )
 
-type License struct {
-   ClientId string
-   PrivateKey string
-   Widevine func([]byte) ([]byte, error)
-}
-
-// try to get PSSH from DASH then MP4
 func Mpd(resp *http.Response, home string) error {
    defer resp.Body.Close()
    data, err := io.ReadAll(resp.Body)
@@ -60,6 +53,12 @@ func Mpd(resp *http.Response, home string) error {
       fmt.Println(&represent)
    }
    return nil
+}
+
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
 }
 
 func init() {

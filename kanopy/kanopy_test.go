@@ -26,15 +26,7 @@ var tests = []struct {
    },
 }
 
-type transport struct{}
-
-func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
-   fmt.Println(req.URL)
-   return http.DefaultTransport.RoundTrip(req)
-}
-
 func Test(t *testing.T) {
-   http.DefaultClient.Transport = transport{}
    data, err := exec.Command("password", "kanopy.com").Output()
    if err != nil {
       t.Fatal(err)

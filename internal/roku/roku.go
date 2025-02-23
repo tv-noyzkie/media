@@ -11,65 +11,11 @@ import (
    "path/filepath"
 )
 
-func main() {
-   http.Transport{}.DefaultClient()
-   log.SetFlags(log.Ltime)
-   var f flags
-   err := f.New()
-   if err != nil {
-      panic(err)
-   }
-   flag.StringVar(&f.roku, "b", "", "Roku ID")
-   flag.StringVar(&f.s.ClientId, "c", f.s.ClientId, "client ID")
-   flag.StringVar(&f.representation, "i", "", "representation")
-   flag.StringVar(&f.s.PrivateKey, "k", f.s.PrivateKey, "private key")
-   flag.BoolVar(&f.code_write, "code", false, "write code")
-   flag.BoolVar(&f.token_write, "token", false, "write token")
-   flag.BoolVar(&f.token_read, "t", false, "read token")
-   flag.Parse()
-   switch {
-   case f.code_write:
-      err := write_code()
-      if err != nil {
-         panic(err)
-      }
-   case f.token_write:
-      err := f.write_token()
-      if err != nil {
-         panic(err)
-      }
-   case f.roku != "":
-      err := f.download()
-      if err != nil {
-         panic(err)
-      }
-   default:
-      flag.Usage()
-   }
-}
-
-func (f *flags) New() error {
-   var err error
-   f.home, err = os.UserHomeDir()
-   if err != nil {
-      return err
-   }
-   f.home = filepath.ToSlash(f.home)
-   f.s.ClientId = f.home + "/widevine/client_id.bin"
-   f.s.PrivateKey = f.home + "/widevine/private_key.pem"
-   return nil
-}
-
-type flags struct {
-   code_write     bool
-   home           string
-   representation string
-   roku           string
-   s              internal.Stream
-   token_read     bool
-   token_write    bool
-}
 func (f *flags) download() error {
+   if f.representation != "" {
+      f.e.Widevine = play.Widevine()
+      return f.e.Download(f.home, f.representation)
+   }
    var code *roku.Code
    if f.token_read {
       data, err := os.ReadFile(f.home + "/roku.txt")
@@ -95,20 +41,68 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   represents, err := internal.Mpd(play)
+   resp, err := play.Mpd()
    if err != nil {
       return err
    }
-   for _, represent := range represents {
-      switch f.representation {
-      case "":
-         fmt.Print(&represent, "\n\n")
-      case represent.Id:
-         f.s.Client = play
-         return f.s.Download(&represent)
-      }
+   return internal.Mpd(resp, f.home)
+}
+
+type flags struct {
+   code_write     bool
+   home           string
+   representation string
+   roku           string
+   token_read     bool
+   token_write    bool
+   e internal.License
+}
+
+func (f *flags) New() error {
+   var err error
+   f.home, err = os.UserHomeDir()
+   if err != nil {
+      return err
    }
+   f.home = filepath.ToSlash(f.home) + "/media"
+   f.e.ClientId = f.home + "/client_id.bin"
+   f.e.PrivateKey = f.home + "/private_key.pem"
    return nil
+}
+
+func main() {
+   var f flags
+   err := f.New()
+   if err != nil {
+      panic(err)
+   }
+   flag.StringVar(&f.roku, "b", "", "Roku ID")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.representation, "i", "", "representation")
+   flag.StringVar(&f.e.PrivateKey, "k", f.e.PrivateKey, "private key")
+   flag.BoolVar(&f.code_write, "code", false, "write code")
+   flag.BoolVar(&f.token_write, "token", false, "write token")
+   flag.BoolVar(&f.token_read, "t", false, "read token")
+   flag.Parse()
+   switch {
+   case f.code_write:
+      err := write_code()
+      if err != nil {
+         panic(err)
+      }
+   case f.token_write:
+      err := f.write_token()
+      if err != nil {
+         panic(err)
+      }
+   case f.roku != "":
+      err := f.download()
+      if err != nil {
+         panic(err)
+      }
+   default:
+      flag.Usage()
+   }
 }
 
 func (f *flags) write_token() error {
