@@ -150,20 +150,20 @@ func (t *Token) Playback(roku_id string) (*Playback, error) {
    return play, nil
 }
 
-///
-
 func (p *Playback) Mpd() (*http.Response, error) {
    return http.Get(p.Url)
 }
 
-func (p *Playback) License(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      p.Drm.Widevine.LicenseServer, "application/x-protobuf",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
+func (p *Playback) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      resp, err := http.Post(
+         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
+         bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
    }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }

@@ -10,6 +10,14 @@ import (
    "strings"
 )
 
+// The Request's URL and Header fields must be initialized
+func (f File) Mpd() (*http.Response, error) {
+   var req http.Request
+   req.Header = http.Header{}
+   req.URL = &f[0]
+   return http.DefaultClient.Do(&req)
+}
+
 func (a Address) String() string {
    var data strings.Builder
    if a[0] != "" {
@@ -190,12 +198,4 @@ func (f *File) UnmarshalText(data []byte) error {
    (*f)[0].Scheme = "http"
    (*f)[0].Host = "silo-hybrik.pluto.tv.s3.amazonaws.com"
    return nil
-}
-
-// The Request's URL and Header fields must be initialized
-func (f File) Mpd() (*http.Response, error) {
-   var req http.Request
-   req.Header = http.Header{}
-   req.URL = &f[0]
-   return http.DefaultClient.Do(&req)
 }

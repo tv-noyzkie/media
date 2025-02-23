@@ -15,6 +15,12 @@ import (
    "strings"
 )
 
+type Item struct {
+   AssetType    string
+   CmsAccountId string
+   ContentId    string
+}
+
 type AppSecret string
 
 // 15.0.52
@@ -80,12 +86,6 @@ func cms_account(id string) int64 {
 type Session struct {
    LsSession string `json:"ls_session"`
    Url       string
-}
-
-type Item struct {
-   AssetType    string
-   CmsAccountId string
-   ContentId    string
 }
 
 func (s *Session) Widevine() func([]byte) ([]byte, error) {

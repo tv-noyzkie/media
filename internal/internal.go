@@ -62,6 +62,11 @@ func Mpd(resp *http.Response, home string) error {
    return nil
 }
 
+func init() {
+   http.DefaultClient.Transport = xhttp.Transport{}
+   log.SetFlags(log.Ltime)
+}
+
 func (e *License) Download(home, id string) error {
    data, err := os.ReadFile(home + "/mpd_body")
    if err != nil {
@@ -455,11 +460,6 @@ func get(u *url.URL, head http.Header) ([]byte, error) {
       return nil, errors.New(data.String())
    }
    return io.ReadAll(resp.Body)
-}
-
-func init() {
-   log.SetFlags(log.Ltime)
-   xhttp.Transport{}.DefaultClient()
 }
 
 func write_file(name string, data []byte) error {
