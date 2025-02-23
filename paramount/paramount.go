@@ -15,27 +15,7 @@ import (
    "strings"
 )
 
-func (a AppSecret) At() (At, error) {
-   key, err := hex.DecodeString(secret_key)
-   if err != nil {
-      return "", err
-   }
-   block, err := aes.NewCipher(key)
-   if err != nil {
-      return "", err
-   }
-   var iv [aes.BlockSize]byte
-   data := []byte{'|'}
-   data = append(data, a...)
-   data = pad(data)
-   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
-   data1 := []byte{0, aes.BlockSize}
-   data1 = append(data1, iv[:]...)
-   data1 = append(data1, data...)
-   return At(base64.StdEncoding.EncodeToString(data1)), nil
-}
-
-func (a At) Session(content_id string, client *http.Client) (*Session, error) {
+func (a At) Session(content_id string) (*Session, error) {
    req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
    req.URL.Path = func() string {
       var b strings.Builder
@@ -47,7 +27,7 @@ func (a At) Session(content_id string, client *http.Client) (*Session, error) {
       "at": {string(a)},
       "contentId": {content_id},
    }.Encode()
-   resp, err := client.Do(req)
+   resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
    }
@@ -63,38 +43,6 @@ func (a At) Session(content_id string, client *http.Client) (*Session, error) {
       return nil, err
    }
    return session1, nil
-}
-
-func (a At) Item(cid string, client *http.Client) (*Item, error) {
-   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
-   req.URL.Path = func() string {
-      var b strings.Builder
-      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
-      b.WriteString(cid)
-      b.WriteString(".json")
-      return b.String()
-   }()
-   req.URL.RawQuery = "at=" + string(a)
-   resp, err := client.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
-   }
-   var value struct {
-      ItemList []Item
-   }
-   err = json.Unmarshal(data, &value)
-   if err != nil {
-      return nil, err
-   }
-   if len(value.ItemList) == 0 {
-      return nil, errors.New(string(data))
-   }
-   return &value.ItemList[0], nil
 }
 
 const secret_key = "302a6a0d70a7e9b967f91d39fef3e387816e3095925ae4537bce96063311f9c5"
@@ -178,3 +126,57 @@ const ComCbsApp AppSecret = "4fb47ec1f5c17caa"
 const ComCbsCa AppSecret = "e55edaeb8451f737"
 
 type At string
+func (a At) Item(cid string, client *http.Client) (*Item, error) {
+   req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
+   req.URL.Path = func() string {
+      var b strings.Builder
+      b.WriteString("/apps-api/v2.0/androidphone/video/cid/")
+      b.WriteString(cid)
+      b.WriteString(".json")
+      return b.String()
+   }()
+   req.URL.RawQuery = "at=" + string(a)
+   resp, err := client.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      return nil, errors.New(resp.Status)
+   }
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return nil, err
+   }
+   var value struct {
+      ItemList []Item
+   }
+   err = json.Unmarshal(data, &value)
+   if err != nil {
+      return nil, err
+   }
+   if len(value.ItemList) == 0 {
+      return nil, errors.New(string(data))
+   }
+   return &value.ItemList[0], nil
+}
+
+func (a AppSecret) At() (At, error) {
+   key, err := hex.DecodeString(secret_key)
+   if err != nil {
+      return "", err
+   }
+   block, err := aes.NewCipher(key)
+   if err != nil {
+      return "", err
+   }
+   var iv [aes.BlockSize]byte
+   data := []byte{'|'}
+   data = append(data, a...)
+   data = pad(data)
+   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
+   data1 := []byte{0, aes.BlockSize}
+   data1 = append(data1, iv[:]...)
+   data1 = append(data1, data...)
+   return At(base64.StdEncoding.EncodeToString(data1)), nil
+}

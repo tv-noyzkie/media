@@ -53,24 +53,16 @@ type flags struct {
    representation string
 }
 
-func (f* flags) client() *http.Client {
+func (f* flags) location() (*http.Client, paramount.AppSecret) {
    if f.mullvad {
       var client http.Client
       client.Transport = mullvad.Transport{}
-      return &client
+      return &client, paramount.ComCbsCa
    }
-   return http.DefaultClient
-}
-
-func (f *flags) secret() paramount.AppSecret {
-   if f.mullvad {
-      return paramount.ComCbsCa
-   }
-   return paramount.ComCbsApp
+   return http.DefaultClient, paramount.ComCbsApp
 }
 
 func (f *flags) download() error {
-   client := f.client()
    if f.representation != "" {
       // INTL does NOT allow anonymous key request, so if you are INTL you
       // will need to use US VPN until someone codes the INTL login
@@ -78,14 +70,15 @@ func (f *flags) download() error {
       if err != nil {
          return err
       }
-      session, err := at.Session(f.content_id, client)
+      session, err := at.Session(f.content_id)
       if err != nil {
          return err
       }
       f.e.Widevine = session.Widevine()
       return f.e.Download(f.home, f.representation)
    }
-   at, err := f.secret().At()
+   client, secret := f.location()
+   at, err := secret.At()
    if err != nil {
       return err
    }
