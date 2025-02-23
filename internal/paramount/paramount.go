@@ -53,7 +53,7 @@ type flags struct {
    representation string
 }
 
-func (f *flags) client() (*paramount.AppToken,) {
+func (f* flags) client() *http.Client {
    if f.mullvad {
       var client http.Client
       client.Transport = mullvad.Transport{}
@@ -62,25 +62,34 @@ func (f *flags) client() (*paramount.AppToken,) {
    return http.DefaultClient
 }
 
-// INTL does NOT allow anonymous key request, so if you are INTL you
-// will need to use US VPN until someone codes the INTL login
+func (f *flags) secret() paramount.AppSecret {
+   if f.mullvad {
+      return paramount.ComCbsCa
+   }
+   return paramount.ComCbsApp
+}
+
 func (f *flags) download() error {
+   client := f.client()
    if f.representation != "" {
-      session, err := paramount.ComCbsApp.Session(f.content_id)
+      // INTL does NOT allow anonymous key request, so if you are INTL you
+      // will need to use US VPN until someone codes the INTL login
+      at, err := paramount.ComCbsApp.At()
+      if err != nil {
+         return err
+      }
+      session, err := at.Session(f.content_id, client)
       if err != nil {
          return err
       }
       f.e.Widevine = session.Widevine()
       return f.e.Download(f.home, f.representation)
    }
-   var token paramount.AppToken
-   if f.mullvad {
-      token = paramount.ComCbsCa
-   } else {
-      token = paramount.ComCbsApp
+   at, err := f.secret().At()
+   if err != nil {
+      return err
    }
-   client := f.client()
-   item, err := token.Item(f.content_id, client)
+   item, err := at.Item(f.content_id, client)
    if err != nil {
       return err
    }
