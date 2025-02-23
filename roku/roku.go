@@ -9,26 +9,6 @@ import (
    "strings"
 )
 
-// code can be nil
-func (Token) Marshal(code1 *Code) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/token"
-   req.Header.Set("user-agent", user_agent)
-   if code1 != nil {
-      req.Header.Set("x-roku-content-token", code1.Token)
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (p *Playback) Mpd() (*http.Response, error) {
-   return http.Get(p.Url)
-}
-
 type Playback struct {
    Drm struct {
       Widevine struct {
@@ -75,6 +55,22 @@ func (a *Activation) Unmarshal(data []byte) error {
    return json.Unmarshal(data, a)
 }
 
+// code can be nil
+func (Token) Marshal(code1 *Code) ([]byte, error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/token"
+   req.Header.Set("user-agent", user_agent)
+   if code1 != nil {
+      req.Header.Set("x-roku-content-token", code1.Token)
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (Activation) Marshal(token1 *Token) ([]byte, error) {
    data, err := json.Marshal(map[string]string{"platform": "googletv"})
    if err != nil {
@@ -100,9 +96,9 @@ func (Activation) Marshal(token1 *Token) ([]byte, error) {
    return io.ReadAll(resp.Body)
 }
 
-func (Code) Marshal(act *Activation, token1 *Token) ([]byte, error) {
+func (Code) Marshal(activate *Activation, token1 *Token) ([]byte, error) {
    req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + act.Code
+   req.URL.Path = "/api/v1/account/activation/" + activate.Code
    req.Header = http.Header{
       "user-agent":           {user_agent},
       "x-roku-content-token": {token1.AuthToken},
@@ -152,6 +148,12 @@ func (t *Token) Playback(roku_id string) (*Playback, error) {
       return nil, err
    }
    return play, nil
+}
+
+///
+
+func (p *Playback) Mpd() (*http.Response, error) {
+   return http.Get(p.Url)
 }
 
 func (p *Playback) License(data []byte) ([]byte, error) {

@@ -15,6 +15,14 @@ import (
    "strings"
 )
 
+type AppSecret string
+
+// 15.0.52
+const ComCbsApp AppSecret = "4fb47ec1f5c17caa"
+
+// 15.0.52
+const ComCbsCa AppSecret = "e55edaeb8451f737"
+
 func (a At) Session(content_id string) (*Session, error) {
    req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
    req.URL.Path = func() string {
@@ -24,7 +32,7 @@ func (a At) Session(content_id string) (*Session, error) {
       return b.String()
    }()
    req.URL.RawQuery = url.Values{
-      "at": {string(a)},
+      "at":        {string(a)},
       "contentId": {content_id},
    }.Encode()
    resp, err := http.DefaultClient.Do(req)
@@ -48,7 +56,7 @@ func (a At) Session(content_id string) (*Session, error) {
 const secret_key = "302a6a0d70a7e9b967f91d39fef3e387816e3095925ae4537bce96063311f9c5"
 
 func pad(data []byte) []byte {
-   length := aes.BlockSize - len(data) % aes.BlockSize
+   length := aes.BlockSize - len(data)%aes.BlockSize
    for high := byte(length); length >= 1; length-- {
       data = append(data, high)
    }
@@ -71,13 +79,13 @@ func cms_account(id string) int64 {
 
 type Session struct {
    LsSession string `json:"ls_session"`
-   Url string
+   Url       string
 }
 
 type Item struct {
-   AssetType string
+   AssetType    string
    CmsAccountId string
-   ContentId string
+   ContentId    string
 }
 
 func (s *Session) Widevine() func([]byte) ([]byte, error) {
@@ -88,7 +96,7 @@ func (s *Session) Widevine() func([]byte) ([]byte, error) {
       }
       req.Header = http.Header{
          "authorization": {"Bearer " + s.LsSession},
-         "content-type": {"application/x-protobuf"},
+         "content-type":  {"application/x-protobuf"},
       }
       resp, err := http.DefaultClient.Do(req)
       if err != nil {
@@ -99,7 +107,29 @@ func (s *Session) Widevine() func([]byte) ([]byte, error) {
    }
 }
 
-func (i *Item) Mpd(client *http.Client) (*http.Response, error) {
+type At string
+
+func (a AppSecret) At() (At, error) {
+   key, err := hex.DecodeString(secret_key)
+   if err != nil {
+      return "", err
+   }
+   block, err := aes.NewCipher(key)
+   if err != nil {
+      return "", err
+   }
+   var iv [aes.BlockSize]byte
+   data := []byte{'|'}
+   data = append(data, a...)
+   data = pad(data)
+   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
+   data1 := []byte{0, aes.BlockSize}
+   data1 = append(data1, iv[:]...)
+   data1 = append(data1, data...)
+   return At(base64.StdEncoding.EncodeToString(data1)), nil
+}
+
+func (i *Item) Mpd() (*http.Response, error) {
    req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
    req.URL.Path = func() string {
       b := []byte("/s/")
@@ -112,21 +142,13 @@ func (i *Item) Mpd(client *http.Client) (*http.Response, error) {
    }()
    req.URL.RawQuery = url.Values{
       "assetTypes": {i.AssetType},
-      "formats": {"MPEG-DASH"},
+      "formats":    {"MPEG-DASH"},
    }.Encode()
-   return client.Do(req)
+   req.Header.Set("vpn", "true")
+   return http.DefaultClient.Do(req)
 }
 
-type AppSecret string
-
-// 15.0.52
-const ComCbsApp AppSecret = "4fb47ec1f5c17caa"
-
-// 15.0.52
-const ComCbsCa AppSecret = "e55edaeb8451f737"
-
-type At string
-func (a At) Item(cid string, client *http.Client) (*Item, error) {
+func (a At) Item(cid string) (*Item, error) {
    req, _ := http.NewRequest("", "https://www.paramountplus.com", nil)
    req.URL.Path = func() string {
       var b strings.Builder
@@ -136,7 +158,8 @@ func (a At) Item(cid string, client *http.Client) (*Item, error) {
       return b.String()
    }()
    req.URL.RawQuery = "at=" + string(a)
-   resp, err := client.Do(req)
+   req.Header.Set("vpn", "true")
+   resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
    }
@@ -159,24 +182,4 @@ func (a At) Item(cid string, client *http.Client) (*Item, error) {
       return nil, errors.New(string(data))
    }
    return &value.ItemList[0], nil
-}
-
-func (a AppSecret) At() (At, error) {
-   key, err := hex.DecodeString(secret_key)
-   if err != nil {
-      return "", err
-   }
-   block, err := aes.NewCipher(key)
-   if err != nil {
-      return "", err
-   }
-   var iv [aes.BlockSize]byte
-   data := []byte{'|'}
-   data = append(data, a...)
-   data = pad(data)
-   cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(data, data)
-   data1 := []byte{0, aes.BlockSize}
-   data1 = append(data1, iv[:]...)
-   data1 = append(data1, data...)
-   return At(base64.StdEncoding.EncodeToString(data1)), nil
 }

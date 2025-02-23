@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	41.neocities.org/dash v1.26.6
-	41.neocities.org/platform v1.6.6
+	41.neocities.org/platform v1.6.7
 	41.neocities.org/sofia v1.7.2
 	41.neocities.org/widevine v1.6.2
 	41.neocities.org/x v1.4.6
