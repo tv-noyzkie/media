@@ -19,6 +19,40 @@ import (
    "strings"
 )
 
+func (e *License) Download(home, id string) error {
+   data, err := os.ReadFile(home + "/mpd_body")
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = os.ReadFile(home + "/mpd_url")
+   if err != nil {
+      return err
+   }
+   var base url.URL
+   err = base.UnmarshalBinary(data)
+   if err != nil {
+      return err
+   }
+   media.Set(&base)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         if represent.SegmentBase != nil {
+            return e.segment_base(&represent)
+         }
+         if represent.SegmentList != nil {
+            return e.segment_list(&represent)
+         }
+         return e.segment_template(&represent)
+      }
+   }
+   return nil
+}
+
 func Mpd(resp *http.Response, home string) error {
    defer resp.Body.Close()
    data, err := io.ReadAll(resp.Body)
@@ -55,49 +89,22 @@ func Mpd(resp *http.Response, home string) error {
    return nil
 }
 
+type transport struct{}
+
+func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
+   log.Println(req.Method, req.URL)
+   return http.DefaultTransport.RoundTrip(req)
+}
+
+func init() {
+   http.DefaultClient.Transport = transport{}
+   log.SetFlags(log.Ltime)
+}
+
 type License struct {
    ClientId string
    PrivateKey string
    Widevine func([]byte) ([]byte, error)
-}
-
-func init() {
-   http.DefaultClient.Transport = xhttp.Transport{}
-   log.SetFlags(log.Ltime)
-}
-
-func (e *License) Download(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == id {
-         if represent.SegmentBase != nil {
-            return e.segment_base(&represent)
-         }
-         if represent.SegmentList != nil {
-            return e.segment_list(&represent)
-         }
-         return e.segment_template(&represent)
-      }
-   }
-   return nil
 }
 
 func (e *License) get_key(head *header) ([]byte, error) {

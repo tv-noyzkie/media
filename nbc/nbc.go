@@ -15,6 +15,85 @@ import (
    "time"
 )
 
+func (m *Metadata) New(guid int) error {
+   value := map[string]any{
+      "query": graphql_compact(bonanza_page),
+      "variables": map[string]any{
+         "app": "nbc",
+         "name": strconv.Itoa(guid),
+         "oneApp": true,
+         "platform": "android",
+         "type": "VIDEO",
+         "userId": "",
+      },
+   }
+   data, err := json.MarshalIndent(value, "", " ")
+   if err != nil {
+      return err
+   }
+   resp, err := http.Post(
+      "https://friendship.nbc.co/v2/graphql", "application/json",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   var value1 struct {
+      Data struct {
+         BonanzaPage struct {
+            Metadata Metadata
+         }
+      }
+      Errors []struct {
+         Message string
+      }
+   }
+   err = json.NewDecoder(resp.Body).Decode(&value1)
+   if err != nil {
+      return err
+   }
+   if err := value1.Errors; len(err) >= 1 {
+      return errors.New(err[0].Message)
+   }
+   *m = value1.Data.BonanzaPage.Metadata
+   return nil
+}
+
+const bonanza_page = `
+query bonanzaPage(
+   $app: NBCUBrands!
+   $name: String!
+   $oneApp: Boolean
+   $platform: SupportedPlatforms!
+   $type: EntityPageType!
+   $userId: String!
+) {
+   bonanzaPage(
+      app: $app
+      name: $name
+      oneApp: $oneApp
+      platform: $platform
+      type: $type
+      userId: $userId
+   ) {
+      metadata {
+         ... on VideoPageData {
+            mpxAccountId
+            mpxGuid
+            programmingType
+         }
+      }
+   }
+}
+` // do not use `query(`
+
+// this is better than strings.Replace and strings.ReplaceAll
+func graphql_compact(data string) string {
+   return strings.Join(strings.Fields(data), " ")
+}
+
+const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
 func (v Vod) Mpd() (*http.Response, error) {
    return http.Get(v.PlaybackUrl)
 }
@@ -86,82 +165,3 @@ type Metadata struct {
    MpxGuid          int64 `json:",string"`
    ProgrammingType  string
 }
-
-func (m *Metadata) New(guid int) error {
-   data, err := json.Marshal(map[string]any{
-      "query": graphql_compact(bonanza_page),
-      "variables": map[string]any{
-         "app": "nbc",
-         "name": strconv.Itoa(guid),
-         "oneApp": true,
-         "platform": "android",
-         "type": "VIDEO",
-         "userId": "",
-      },
-   })
-   if err != nil {
-      return err
-   }
-   resp, err := http.Post(
-      "https://friendship.nbc.co/v2/graphql", "application/json",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   var value struct {
-      Data struct {
-         BonanzaPage struct {
-            Metadata Metadata
-         }
-      }
-      Errors []struct {
-         Message string
-      }
-   }
-   err = json.NewDecoder(resp.Body).Decode(&value)
-   if err != nil {
-      return err
-   }
-   if err := value.Errors; len(err) >= 1 {
-      return errors.New(err[0].Message)
-   }
-   *m = value.Data.BonanzaPage.Metadata
-   return nil
-}
-
-const bonanza_page = `
-query bonanzaPage(
-   $app: NBCUBrands!
-   $name: String!
-   $oneApp: Boolean
-   $platform: SupportedPlatforms!
-   $type: EntityPageType!
-   $userId: String!
-) {
-   bonanzaPage(
-      app: $app
-      name: $name
-      oneApp: $oneApp
-      platform: $platform
-      type: $type
-      userId: $userId
-   ) {
-      metadata {
-         ... on VideoPageData {
-            mpxAccountId
-            mpxGuid
-            programmingType
-         }
-      }
-   }
-}
-` // do not use `query(`
-
-// this is better than strings.Replace and strings.ReplaceAll
-func graphql_compact(data string) string {
-   return strings.Join(strings.Fields(data), " ")
-}
-
-const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
