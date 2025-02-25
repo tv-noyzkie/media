@@ -19,41 +19,15 @@ import (
    "strings"
 )
 
-func (e *License) Download(home, id string) error {
-   data, err := os.ReadFile(home + "/mpd_body")
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = os.ReadFile(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   var base url.URL
-   err = base.UnmarshalBinary(data)
-   if err != nil {
-      return err
-   }
-   media.Set(&base)
-   for represent := range media.Representation() {
-      if represent.Id == id {
-         if represent.SegmentBase != nil {
-            return e.segment_base(&represent)
-         }
-         if represent.SegmentList != nil {
-            return e.segment_list(&represent)
-         }
-         return e.segment_template(&represent)
-      }
-   }
-   return nil
-}
-
 func Mpd(resp *http.Response, home string) error {
+   err := xhttp.Write(home + "/.mpd", resp)
+   if err != nil {
+      return err
+   }
+   resp, err = xhttp.Read(home + "/.mpd")
+   if err != nil {
+      return err
+   }
    defer resp.Body.Close()
    data, err := io.ReadAll(resp.Body)
    if err != nil {
@@ -65,16 +39,6 @@ func Mpd(resp *http.Response, home string) error {
       return err
    }
    media.Set(resp.Request.URL)
-   err = write_file(home+"/mpd_body", data)
-   if err != nil {
-      return err
-   }
-   os_file, err := create(home + "/mpd_url")
-   if err != nil {
-      return err
-   }
-   defer os_file.Close()
-   fmt.Fprint(os_file, resp.Request.URL)
    represents := slices.SortedFunc(media.Representation(),
       func(a, b dash.Representation) int {
          return a.Bandwidth - b.Bandwidth
@@ -85,6 +49,36 @@ func Mpd(resp *http.Response, home string) error {
          fmt.Println()
       }
       fmt.Println(&represent)
+   }
+   return nil
+}
+
+func (e *License) Download(home, id string) error {
+   resp, err := xhttp.Read(home + "/.mpd")
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   media.Set(resp.Request.URL)
+   for represent := range media.Representation() {
+      if represent.Id == id {
+         if represent.SegmentBase != nil {
+            return e.segment_base(&represent)
+         }
+         if represent.SegmentList != nil {
+            return e.segment_list(&represent)
+         }
+         return e.segment_template(&represent)
+      }
    }
    return nil
 }
@@ -466,11 +460,6 @@ func get(u *url.URL, head http.Header) ([]byte, error) {
       return nil, errors.New(data.String())
    }
    return io.ReadAll(resp.Body)
-}
-
-func write_file(name string, data []byte) error {
-   log.Println("WriteFile", name)
-   return os.WriteFile(name, data, os.ModePerm)
 }
 
 func write_segment(data, key []byte) ([]byte, error) {
