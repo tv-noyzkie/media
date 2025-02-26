@@ -20,11 +20,11 @@ import (
 )
 
 func Mpd(resp *http.Response, home string) error {
-   err := xhttp.Write(home + "/.mpd", resp)
+   err := xhttp.WriteFile(home + "/.mpd", resp)
    if err != nil {
       return err
    }
-   resp, err = xhttp.Read(home + "/.mpd")
+   resp, err = xhttp.ReadFile(home + "/.mpd")
    if err != nil {
       return err
    }
@@ -54,7 +54,7 @@ func Mpd(resp *http.Response, home string) error {
 }
 
 func (e *License) Download(home, id string) error {
-   resp, err := xhttp.Read(home + "/.mpd")
+   resp, err := xhttp.ReadFile(home + "/.mpd")
    if err != nil {
       return err
    }

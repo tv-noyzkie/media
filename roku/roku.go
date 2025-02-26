@@ -9,24 +9,6 @@ import (
    "strings"
 )
 
-func (p *Playback) Mpd() (*http.Response, error) {
-   return http.Get(p.Url)
-}
-
-func (p *Playback) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      resp, err := http.Post(
-         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
-         bytes.NewReader(data),
-      )
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
-}
-
 type Playback struct {
    Drm struct {
       Widevine struct {
@@ -50,10 +32,6 @@ type Code struct {
 
 const user_agent = "trc-googletv; production; 0"
 
-func (c *Code) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, c)
-}
-
 func (a *Activation) String() string {
    var b strings.Builder
    b.WriteString("1 Visit the URL\n")
@@ -63,6 +41,69 @@ func (a *Activation) String() string {
    b.WriteString("  ")
    b.WriteString(a.Code)
    return b.String()
+}
+
+func (t *Token) Playback(roku_id string) (*Playback, error) {
+   data, err := json.Marshal(map[string]string{
+      "mediaFormat": "DASH",
+      "providerId":  "rokuavod",
+      "rokuId":      roku_id,
+   })
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://googletv.web.roku.com/api/v3/playback",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "content-type":         {"application/json"},
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {t.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var b strings.Builder
+      resp.Write(&b)
+      return nil, errors.New(b.String())
+   }
+   play := &Playback{}
+   err = json.NewDecoder(resp.Body).Decode(play)
+   if err != nil {
+      return nil, err
+   }
+   return play, nil
+}
+
+///
+
+func (p *Playback) Mpd() (*http.Response, error) {
+   return http.Get(p.Url)
+}
+
+func (p *Playback) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      resp, err := http.Post(
+         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
+         bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
+   }
+}
+
+func (c *Code) Unmarshal(data []byte) error {
+   return json.Unmarshal(data, c)
 }
 
 func (t *Token) Unmarshal(data []byte) error {
@@ -127,43 +168,4 @@ func (Code) Marshal(activate *Activation, token1 *Token) ([]byte, error) {
    }
    defer resp.Body.Close()
    return io.ReadAll(resp.Body)
-}
-
-func (t *Token) Playback(roku_id string) (*Playback, error) {
-   data, err := json.Marshal(map[string]string{
-      "mediaFormat": "DASH",
-      "providerId":  "rokuavod",
-      "rokuId":      roku_id,
-   })
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://googletv.web.roku.com/api/v3/playback",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "content-type":         {"application/json"},
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var b strings.Builder
-      resp.Write(&b)
-      return nil, errors.New(b.String())
-   }
-   play := &Playback{}
-   err = json.NewDecoder(resp.Body).Decode(play)
-   if err != nil {
-      return nil, err
-   }
-   return play, nil
 }
