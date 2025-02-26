@@ -43,6 +43,59 @@ func (a *Activation) String() string {
    return b.String()
 }
 
+// code can be nil
+func RequestToken(c *Code) (*http.Response, error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/token"
+   req.Header.Set("user-agent", user_agent)
+   if c != nil {
+      req.Header.Set("x-roku-content-token", c.Token)
+   }
+   return http.DefaultClient.Do(req)
+}
+
+func (t *Token) Read(resp *http.Response) error {
+   return json.NewDecoder(resp.Body).Decode(t)
+}
+
+func (t *Token) Activation() (*http.Response, error) {
+   data, err := json.Marshal(map[string]string{"platform": "googletv"})
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "content-type":         {"application/json"},
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {t.AuthToken},
+   }
+   return http.DefaultClient.Do(req)
+}
+
+func (a *Activation) Read(resp *http.Response) error {
+   return json.NewDecoder(resp.Body).Decode(a)
+}
+
+func (t *Token) Code(activate *Activation) (*http.Response, error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/activation/" + activate.Code
+   req.Header = http.Header{
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {t.AuthToken},
+   }
+   return http.DefaultClient.Do(req)
+}
+
+func (c *Code) Read(resp *http.Response) error {
+   return json.NewDecoder(resp.Body).Decode(c)
+}
+
 func (t *Token) Playback(roku_id string) (*Playback, error) {
    data, err := json.Marshal(map[string]string{
       "mediaFormat": "DASH",
@@ -82,8 +135,6 @@ func (t *Token) Playback(roku_id string) (*Playback, error) {
    return play, nil
 }
 
-///
-
 func (p *Playback) Mpd() (*http.Response, error) {
    return http.Get(p.Url)
 }
@@ -100,72 +151,4 @@ func (p *Playback) Widevine() func([]byte) ([]byte, error) {
       defer resp.Body.Close()
       return io.ReadAll(resp.Body)
    }
-}
-
-func (c *Code) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, c)
-}
-
-func (t *Token) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, t)
-}
-
-func (a *Activation) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, a)
-}
-
-// code can be nil
-func (Token) Marshal(code1 *Code) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/token"
-   req.Header.Set("user-agent", user_agent)
-   if code1 != nil {
-      req.Header.Set("x-roku-content-token", code1.Token)
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (Activation) Marshal(token1 *Token) ([]byte, error) {
-   data, err := json.Marshal(map[string]string{"platform": "googletv"})
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "content-type":         {"application/json"},
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {token1.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (Code) Marshal(activate *Activation, token1 *Token) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + activate.Code
-   req.Header = http.Header{
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {token1.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }

@@ -11,51 +11,14 @@ import (
    "path/filepath"
 )
 
-func (f *flags) download() error {
-   if f.representation != "" {
-      f.e.Widevine = play.Widevine()
-      return f.e.Download(f.home, f.representation)
-   }
-   var code *roku.Code
-   if f.token_read {
-      data, err := os.ReadFile(f.home + "/roku.txt")
-      if err != nil {
-         return err
-      }
-      code = &roku.Code{}
-      err = code.Unmarshal(data)
-      if err != nil {
-         return err
-      }
-   }
-   var token roku.Token
-   data, err := token.Marshal(code)
-   if err != nil {
-      return err
-   }
-   err = token.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   play, err := token.Playback(f.roku)
-   if err != nil {
-      return err
-   }
-   resp, err := play.Mpd()
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(resp, f.home)
-}
-
 type flags struct {
    code_write     bool
+   e              internal.License
    home           string
    representation string
    roku           string
    token_read     bool
    token_write    bool
-   e internal.License
 }
 
 func (f *flags) New() error {
@@ -103,6 +66,45 @@ func main() {
    default:
       flag.Usage()
    }
+}
+
+///
+
+func (f *flags) download() error {
+   if f.representation != "" {
+      f.e.Widevine = play.Widevine()
+      return f.e.Download(f.home, f.representation)
+   }
+   var code *roku.Code
+   if f.token_read {
+      data, err := os.ReadFile(f.home + "/roku.txt")
+      if err != nil {
+         return err
+      }
+      code = &roku.Code{}
+      err = code.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+   }
+   var token roku.Token
+   data, err := token.Marshal(code)
+   if err != nil {
+      return err
+   }
+   err = token.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   play, err := token.Playback(f.roku)
+   if err != nil {
+      return err
+   }
+   resp, err := play.Mpd()
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(resp, f.home)
 }
 
 func (f *flags) write_token() error {
