@@ -24,12 +24,12 @@ func Mpd(resp *http.Response, home string) error {
    if err != nil {
       return err
    }
-   resp, err = xhttp.ReadFile(home + "/.mpd")
+   resp1, err := xhttp.ReadFile(home + "/.mpd")
    if err != nil {
       return err
    }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
+   defer resp1.Body.Close()
+   data, err := io.ReadAll(resp1.Body)
    if err != nil {
       return err
    }
@@ -38,7 +38,7 @@ func Mpd(resp *http.Response, home string) error {
    if err != nil {
       return err
    }
-   media.Set(resp.Request.URL)
+   media.Set(resp1.Request.URL)
    represents := slices.SortedFunc(media.Representation(),
       func(a, b dash.Representation) int {
          return a.Bandwidth - b.Bandwidth
