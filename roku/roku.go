@@ -44,7 +44,7 @@ func (a *Activation) String() string {
 }
 
 // code can be nil
-func RequestToken(c *Code) (*http.Response, error) {
+func NewToken(c *Code) (*http.Response, error) {
    req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
    req.URL.Path = "/api/v1/account/token"
    req.Header.Set("user-agent", user_agent)

@@ -19,41 +19,7 @@ import (
    "strings"
 )
 
-func Mpd(resp *http.Response, home string) error {
-   err := xhttp.WriteFile(home + "/.mpd", resp)
-   if err != nil {
-      return err
-   }
-   resp1, err := xhttp.ReadFile(home + "/.mpd")
-   if err != nil {
-      return err
-   }
-   defer resp1.Body.Close()
-   data, err := io.ReadAll(resp1.Body)
-   if err != nil {
-      return err
-   }
-   var media dash.Mpd
-   err = media.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   media.Set(resp1.Request.URL)
-   represents := slices.SortedFunc(media.Representation(),
-      func(a, b dash.Representation) int {
-         return a.Bandwidth - b.Bandwidth
-      },
-   )
-   for i, represent := range represents {
-      if i >= 1 {
-         fmt.Println()
-      }
-      fmt.Println(&represent)
-   }
-   return nil
-}
-
-func (e *License) Download(home, id string) error {
+func (e *License) Download(name, id string) error {
    resp, err := xhttp.ReadFile(home + "/.mpd")
    if err != nil {
       return err
@@ -79,6 +45,46 @@ func (e *License) Download(home, id string) error {
          }
          return e.segment_template(&represent)
       }
+   }
+   return nil
+}
+
+func Mpd(name string, resp *http.Response) error {
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return err
+   }
+   log.Println("Create", name)
+   file, err := os.Create(name)
+   if err != nil {
+      return err
+   }
+   defer file.Close()
+   _, err = fmt.Fprintln(file, resp.Request.URL)
+   if err != nil {
+      return err
+   }
+   _, err = file.Write(data)
+   if err != nil {
+      return err
+   }
+   var media dash.Mpd
+   err = media.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   media.Set(resp.Request.URL)
+   represents := slices.SortedFunc(media.Representation(),
+      func(a, b dash.Representation) int {
+         return a.Bandwidth - b.Bandwidth
+      },
+   )
+   for i, represent := range represents {
+      if i >= 1 {
+         fmt.Println()
+      }
+      fmt.Println(&represent)
    }
    return nil
 }
