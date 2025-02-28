@@ -11,6 +11,96 @@ import (
    "path/filepath"
 )
 
+type flags struct {
+   code_write     bool
+   e              internal.License
+   home           string
+   representation string
+   roku           string
+   token_read     bool
+   token_write    bool
+}
+
+func (f *flags) New() error {
+   var err error
+   f.home, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.home = filepath.ToSlash(f.home) + "/media"
+   f.e.ClientId = f.home + "/client_id.bin"
+   f.e.PrivateKey = f.home + "/private_key.pem"
+   return nil
+}
+
+func main() {
+   var f flags
+   err := f.New()
+   if err != nil {
+      panic(err)
+   }
+   flag.StringVar(&f.roku, "b", "", "Roku ID")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.representation, "i", "", "representation")
+   flag.StringVar(&f.e.PrivateKey, "k", f.e.PrivateKey, "private key")
+   flag.BoolVar(&f.code_write, "code", false, "1 write code")
+   flag.BoolVar(&f.token_write, "token", false, "2 write token")
+   flag.BoolVar(&f.token_read, "t", false, "3 read token")
+   flag.Parse()
+   switch {
+   case f.code_write:
+      err := write_code()
+      if err != nil {
+         panic(err)
+      }
+   case f.token_write:
+      err := f.write_token()
+      if err != nil {
+         panic(err)
+      }
+   case f.roku != "":
+      err := f.download()
+      if err != nil {
+         panic(err)
+      }
+   default:
+      flag.Usage()
+   }
+}
+
+///
+
+func write_code() error {
+   var token roku.Token
+   data, err := token.Marshal(nil)
+   if err != nil {
+      return err
+   }
+   err = os.WriteFile("token.txt", data, os.ModePerm)
+   if err != nil {
+      return err
+   }
+   err = token.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   var activation roku.Activation
+   data, err = activation.Marshal(&token)
+   if err != nil {
+      return err
+   }
+   err = os.WriteFile("activation.txt", data, os.ModePerm)
+   if err != nil {
+      return err
+   }
+   err = activation.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   fmt.Println(activation)
+   return nil
+}
+
 func (f *flags) download() error {
    if f.representation != "" {
       f.e.Widevine = play.Widevine()
@@ -72,35 +162,4 @@ func (f *flags) write_token() error {
       return err
    }
    return os.WriteFile(f.home+"/roku.txt", data, os.ModePerm)
-}
-
-func write_code() error {
-   var token roku.Token
-   data, err := token.Marshal(nil)
-   if err != nil {
-      return err
-   }
-   err = os.WriteFile("token.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
-   err = token.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   var activation roku.Activation
-   data, err = activation.Marshal(&token)
-   if err != nil {
-      return err
-   }
-   err = os.WriteFile("activation.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
-   err = activation.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   fmt.Println(activation)
-   return nil
 }
