@@ -9,6 +9,10 @@ import (
    "strings"
 )
 
+type Code struct {
+   Token string
+}
+
 type Playback struct {
    Drm struct {
       Widevine struct {
@@ -18,16 +22,8 @@ type Playback struct {
    Url string
 }
 
-type Token struct {
-   AuthToken string
-}
-
 type Activation struct {
    Code string
-}
-
-type Code struct {
-   Token string
 }
 
 const user_agent = "trc-googletv; production; 0"
@@ -43,57 +39,8 @@ func (a *Activation) String() string {
    return b.String()
 }
 
-// code can be nil
-func NewToken(c *Code) (*http.Response, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/token"
-   req.Header.Set("user-agent", user_agent)
-   if c != nil {
-      req.Header.Set("x-roku-content-token", c.Token)
-   }
-   return http.DefaultClient.Do(req)
-}
-
-func (t *Token) Read(resp *http.Response) error {
-   return json.NewDecoder(resp.Body).Decode(t)
-}
-
-func (t *Token) Activation() (*http.Response, error) {
-   data, err := json.Marshal(map[string]string{"platform": "googletv"})
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "content-type":         {"application/json"},
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
-   }
-   return http.DefaultClient.Do(req)
-}
-
-func (a *Activation) Read(resp *http.Response) error {
-   return json.NewDecoder(resp.Body).Decode(a)
-}
-
-func (t *Token) Code(activate *Activation) (*http.Response, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + activate.Code
-   req.Header = http.Header{
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
-   }
-   return http.DefaultClient.Do(req)
-}
-
-func (c *Code) Read(resp *http.Response) error {
-   return json.NewDecoder(resp.Body).Decode(c)
+type Token struct {
+   AuthToken string
 }
 
 func (t *Token) Playback(roku_id string) (*Playback, error) {
@@ -151,4 +98,76 @@ func (p *Playback) Widevine() func([]byte) ([]byte, error) {
       defer resp.Body.Close()
       return io.ReadAll(resp.Body)
    }
+}
+
+type Data[T any] []byte
+
+// code can be nil
+func (c *Code) Marshal() (Data[Token], error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/token"
+   req.Header.Set("user-agent", user_agent)
+   if c != nil {
+      req.Header.Set("x-roku-content-token", c.Token)
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (t *Token) Unmarshal(d Data[Token]) error {
+   return json.Unmarshal(d, t)
+}
+
+///
+
+func (t *Token) Activation() ([]byte, error) {
+   data, err := json.Marshal(map[string]string{"platform": "googletv"})
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "content-type":         {"application/json"},
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {t.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (a *Activation) Unmarshal(data []byte) error {
+   return json.Unmarshal(data, a)
+}
+
+func (t *Token) Code(activate *Activation) ([]byte, error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/activation/" + activate.Code
+   req.Header = http.Header{
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {t.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (c *Code) Unmarshal(data []byte) error {
+   return json.Unmarshal(data, c)
 }

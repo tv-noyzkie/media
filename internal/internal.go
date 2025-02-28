@@ -20,12 +20,13 @@ import (
 )
 
 func (e *License) Download(name, id string) error {
-   resp, err := xhttp.ReadFile(home + "/.mpd")
+   data, err := os.ReadFile(name)
    if err != nil {
       return err
    }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
+   data1, data, _ := bytes.Cut(data, []byte{'\n'})
+   var base url.URL
+   err = base.UnmarshalBinary(data1)
    if err != nil {
       return err
    }
@@ -34,7 +35,7 @@ func (e *License) Download(name, id string) error {
    if err != nil {
       return err
    }
-   media.Set(resp.Request.URL)
+   media.Set(&base)
    for represent := range media.Representation() {
       if represent.Id == id {
          if represent.SegmentBase != nil {
@@ -61,14 +62,8 @@ func Mpd(name string, resp *http.Response) error {
       return err
    }
    defer file.Close()
-   _, err = fmt.Fprintln(file, resp.Request.URL)
-   if err != nil {
-      return err
-   }
-   _, err = file.Write(data)
-   if err != nil {
-      return err
-   }
+   fmt.Fprintln(file, resp.Request.URL)
+   file.Write(data)
    var media dash.Mpd
    err = media.Unmarshal(data)
    if err != nil {

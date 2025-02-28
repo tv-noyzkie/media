@@ -66,7 +66,7 @@ func (f *flags) download() error {
          return err
       }
       f.e.Widevine = session.Widevine()
-      return f.e.Download(f.home, f.representation)
+      return f.e.Download(f.home + "/.mpd", f.representation)
    }
    var secret paramount.AppSecret
    if f.mullvad {
@@ -88,5 +88,5 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   return internal.Mpd(resp, f.home)
+   return internal.Mpd(f.home + "/.mpd", resp)
 }

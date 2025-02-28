@@ -8,28 +8,6 @@ import (
    "path/filepath"
 )
 
-func (f *flags) download() error {
-   if f.representation != "" {
-      f.e.Widevine = nbc.Widevine
-      return f.e.Download(f.home, f.representation)
-   }
-   var metadata nbc.Metadata
-   err := metadata.New(f.nbc)
-   if err != nil {
-      return err
-   }
-   vod, err := metadata.Vod()
-   if err != nil {
-      return err
-   }
-   resp, err := vod.Mpd()
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(resp, f.home)
-}
-
-
 type flags struct {
    e              internal.License
    home           string
@@ -68,4 +46,25 @@ func main() {
    } else {
       flag.Usage()
    }
+}
+
+func (f *flags) download() error {
+   if f.representation != "" {
+      f.e.Widevine = nbc.Widevine
+      return f.e.Download(f.home + "/.mpd", f.representation)
+   }
+   var metadata nbc.Metadata
+   err := metadata.New(f.nbc)
+   if err != nil {
+      return err
+   }
+   vod, err := metadata.Vod()
+   if err != nil {
+      return err
+   }
+   resp, err := vod.Mpd()
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.home + "/.mpd", resp)
 }
