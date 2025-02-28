@@ -9,41 +9,57 @@ import (
    "strings"
 )
 
-type Code struct {
-   Token string
-}
-
-type Playback struct {
-   Drm struct {
-      Widevine struct {
-         LicenseServer string
-      }
-   }
-   Url string
-}
-
-type Activation struct {
-   Code string
-}
-
 const user_agent = "trc-googletv; production; 0"
 
-func (a *Activation) String() string {
-   var b strings.Builder
-   b.WriteString("1 Visit the URL\n")
-   b.WriteString("  therokuchannel.com/link\n")
-   b.WriteString("\n")
-   b.WriteString("2 Enter the activation code\n")
-   b.WriteString("  ")
-   b.WriteString(a.Code)
-   return b.String()
-}
-
-type Token struct {
+type AccountToken struct {
    AuthToken string
 }
 
-func (t *Token) Playback(roku_id string) (*Playback, error) {
+func (a *AccountToken) Code(act *Activation) (Byte[Code], error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/activation/" + act.Code
+   req.Header = http.Header{
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {a.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (a *AccountToken) Unmarshal(data Byte[AccountToken]) error {
+   return json.Unmarshal(data, a)
+}
+
+func (a *AccountToken) Activation() (Byte[Activation], error) {
+   data, err := json.Marshal(map[string]string{"platform": "googletv"})
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "content-type":         {"application/json"},
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {a.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (a *AccountToken) Playback(roku_id string) (*Playback, error) {
    data, err := json.Marshal(map[string]string{
       "mediaFormat": "DASH",
       "providerId":  "rokuavod",
@@ -62,7 +78,7 @@ func (t *Token) Playback(roku_id string) (*Playback, error) {
    req.Header = http.Header{
       "content-type":         {"application/json"},
       "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
+      "x-roku-content-token": {a.AuthToken},
    }
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
@@ -82,28 +98,37 @@ func (t *Token) Playback(roku_id string) (*Playback, error) {
    return play, nil
 }
 
-func (p *Playback) Mpd() (*http.Response, error) {
-   return http.Get(p.Url)
+func (a *Activation) String() string {
+   var b strings.Builder
+   b.WriteString("1 Visit the URL\n")
+   b.WriteString("  therokuchannel.com/link\n")
+   b.WriteString("\n")
+   b.WriteString("2 Enter the activation code\n")
+   b.WriteString("  ")
+   b.WriteString(a.Code)
+   return b.String()
 }
 
-func (p *Playback) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      resp, err := http.Post(
-         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
-         bytes.NewReader(data),
-      )
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
+func (a *Activation) Unmarshal(data Byte[Activation]) error {
+   return json.Unmarshal(data, a)
 }
 
-type Data[T any] []byte
+type Activation struct {
+   Code string
+}
+
+type Byte[T any] []byte
+
+type Code struct {
+   Token string
+}
+
+func (c *Code) Unmarshal(data Byte[Code]) error {
+   return json.Unmarshal(data, c)
+}
 
 // code can be nil
-func (c *Code) Marshal() (Data[Token], error) {
+func (c *Code) AccountToken() (Byte[AccountToken], error) {
    req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
    req.URL.Path = "/api/v1/account/token"
    req.Header.Set("user-agent", user_agent)
@@ -118,56 +143,25 @@ func (c *Code) Marshal() (Data[Token], error) {
    return io.ReadAll(resp.Body)
 }
 
-func (t *Token) Unmarshal(d Data[Token]) error {
-   return json.Unmarshal(d, t)
+type Playback struct {
+   Drm struct {
+      Widevine struct {
+         LicenseServer string
+      }
+   }
+   Url string // MPD
 }
 
-///
-
-func (t *Token) Activation() ([]byte, error) {
-   data, err := json.Marshal(map[string]string{"platform": "googletv"})
-   if err != nil {
-      return nil, err
+func (p *Playback) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      resp, err := http.Post(
+         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
+         bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
    }
-   req, err := http.NewRequest(
-      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.Header = http.Header{
-      "content-type":         {"application/json"},
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (a *Activation) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, a)
-}
-
-func (t *Token) Code(activate *Activation) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + activate.Code
-   req.Header = http.Header{
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {t.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (c *Code) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, c)
 }

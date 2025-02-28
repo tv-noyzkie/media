@@ -15,6 +15,10 @@ import (
    "time"
 )
 
+type Vod struct {
+   PlaybackUrl string // MPD
+}
+
 func (m *Metadata) New(guid int) error {
    value := map[string]any{
       "query": graphql_compact(bonanza_page),
@@ -94,13 +98,6 @@ func graphql_compact(data string) string {
 }
 
 const drm_proxy_secret = "Whn8QFuLFM7Heiz6fYCYga7cYPM8ARe6"
-func (v Vod) Mpd() (*http.Response, error) {
-   return http.Get(v.PlaybackUrl)
-}
-
-type Vod struct {
-   PlaybackUrl string
-}
 
 func Widevine(data []byte) ([]byte, error) {
    time1 := fmt.Sprint(time.Now().UnixMilli())
