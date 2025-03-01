@@ -57,16 +57,7 @@ func (s status) Error() string {
 
 var forbidden = status{"HTTP Status 403 – Forbidden"}
 
-func (t *TextTrack) String() string {
-   return "id = " + t.Id
-}
-
 type status [1]string
-
-type TextTrack struct {
-   Id  string
-   Url string
-}
 
 type Film struct {
    Id    int64
@@ -112,10 +103,6 @@ func (a Address) Film() (*Film, error) {
       return nil, err
    }
    return film1, nil
-}
-type SecureUrl struct {
-   TextTrackUrls []TextTrack `json:"text_track_urls"`
-   Url           string // MPD
 }
 
 // Mubi do this sneaky thing. you cannot download a video unless you have told
@@ -252,3 +239,11 @@ func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
 }
 
 type Address [1]string
+
+type SecureUrl struct {
+   TextTrackUrls []struct {
+      Id  string
+      Url string
+   } `json:"text_track_urls"`
+   Url           string // MPD
+}

@@ -11,6 +11,92 @@ import (
    "path/filepath"
 )
 
+func (f *flags) do_text() error {
+   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
+   if err != nil {
+      return err
+   }
+   var auth mubi.Authenticate
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   film, err := f.address.Film()
+   if err != nil {
+      return err
+   }
+   secure, err := auth.SecureUrl(film)
+   if err != nil {
+      return err
+   }
+   for _, text := range secure.TextTrackUrls {
+      err = func() error {
+         resp, err := http.Get(text.Url)
+         if err != nil {
+            return err
+         }
+         defer resp.Body.Close()
+         file, err := os.Create(".vtt")
+         if err != nil {
+            return err
+         }
+         defer file.Close()
+         _, err = file.ReadFrom(resp.Body)
+         if err != nil {
+            return err
+         }
+         return nil
+      }()
+      if err != nil {
+         return err
+      }
+   }
+   return nil
+}
+
+func (f *flags) do_dash() error {
+   if f.representation != "" {
+      data, err := os.ReadFile(f.media + "/mubi/Authenticate")
+      if err != nil {
+         return err
+      }
+      var auth mubi.Authenticate
+      err = auth.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return auth.Widevine(data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.representation)
+   }
+   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
+   if err != nil {
+      return err
+   }
+   var auth mubi.Authenticate
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   film, err := f.address.Film()
+   if err != nil {
+      return err
+   }
+   err = auth.Viewing(film)
+   if err != nil {
+      return err
+   }
+   secure, err := auth.SecureUrl(film)
+   if err != nil {
+      return err
+   }
+   resp, err := http.Get(secure.Url)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media + "/Mpd", resp)
+}
 func (f *flags) New() error {
    var err error
    f.media, err = os.UserHomeDir()
@@ -111,94 +197,4 @@ func (f *flags) do_auth() error {
       return err
    }
    return f.write_file("/mubi/Authenticate", data)
-}
-
-func (f *flags) do_text() error {
-   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
-   if err != nil {
-      return err
-   }
-   var auth mubi.Authenticate
-   err = auth.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   film, err := f.address.Film()
-   if err != nil {
-      return err
-   }
-   secure, err := auth.SecureUrl(film)
-   if err != nil {
-      return err
-   }
-   for i, text := range secure.TextTrackUrls {
-      switch f.representation {
-      case "":
-         if i >= 1 {
-            fmt.Println()
-         }
-         fmt.Println(&text)
-      case text.Id:
-         resp, err := http.Get(text.Url)
-         if err != nil {
-            return err
-         }
-         defer resp.Body.Close()
-         file, err := os.Create(".vtt")
-         if err != nil {
-            return err
-         }
-         defer file.Close()
-         _, err = file.ReadFrom(resp.Body)
-         if err != nil {
-            return err
-         }
-         return nil
-      }
-   }
-   return nil
-}
-
-func (f *flags) do_dash() error {
-   if f.representation != "" {
-      data, err := os.ReadFile(f.media + "/mubi/Authenticate")
-      if err != nil {
-         return err
-      }
-      var auth mubi.Authenticate
-      err = auth.Unmarshal(data)
-      if err != nil {
-         return err
-      }
-      f.e.Widevine = func(data []byte) ([]byte, error) {
-         return auth.Widevine(data)
-      }
-      return f.e.Download(f.media + "/Mpd", f.representation)
-   }
-   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
-   if err != nil {
-      return err
-   }
-   var auth mubi.Authenticate
-   err = auth.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   film, err := f.address.Film()
-   if err != nil {
-      return err
-   }
-   err = auth.Viewing(film)
-   if err != nil {
-      return err
-   }
-   secure, err := auth.SecureUrl(film)
-   if err != nil {
-      return err
-   }
-   resp, err := http.Get(secure.Url)
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(f.media + "/Mpd", resp)
 }
