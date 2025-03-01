@@ -9,6 +9,39 @@ import (
    "strings"
 )
 
+type Byte[T any] []byte
+
+// code can be nil
+func (c *Code) AccountToken() (Byte[AccountToken], error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/token"
+   req.Header.Set("user-agent", user_agent)
+   if c != nil {
+      req.Header.Set("x-roku-content-token", c.Token)
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (a *AccountToken) Code(act *Activation) (Byte[Code], error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/activation/" + act.Code
+   req.Header = http.Header{
+      "user-agent":           {user_agent},
+      "x-roku-content-token": {a.AuthToken},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (a *AccountToken) Activation() (Byte[Activation], error) {
    data, err := json.Marshal(map[string]string{"platform": "googletv"})
    if err != nil {
@@ -42,21 +75,6 @@ const user_agent = "trc-googletv; production; 0"
 
 type AccountToken struct {
    AuthToken string
-}
-
-func (a *AccountToken) Code(act *Activation) (Byte[Code], error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + act.Code
-   req.Header = http.Header{
-      "user-agent":           {user_agent},
-      "x-roku-content-token": {a.AuthToken},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 func (a *AccountToken) Playback(roku_id string) (*Playback, error) {
@@ -117,30 +135,12 @@ type Activation struct {
    Code string
 }
 
-type Byte[T any] []byte
-
 type Code struct {
    Token string
 }
 
 func (c *Code) Unmarshal(data Byte[Code]) error {
    return json.Unmarshal(data, c)
-}
-
-// code can be nil
-func (c *Code) AccountToken() (Byte[AccountToken], error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/token"
-   req.Header.Set("user-agent", user_agent)
-   if c != nil {
-      req.Header.Set("x-roku-content-token", c.Token)
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 type Playback struct {
