@@ -7,9 +7,19 @@ import (
    "errors"
    "io"
    "net/http"
+   "path"
    "strconv"
    "strings"
 )
+
+func (t *TextTrack) Base() string {
+   return path.Base(t.Url)
+}
+
+type TextTrack struct {
+   Id  string
+   Url string
+}
 
 func (a *Authenticate) Widevine(data []byte) ([]byte, error) {
    // final slash is needed
@@ -241,9 +251,6 @@ func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
 type Address [1]string
 
 type SecureUrl struct {
-   TextTrackUrls []struct {
-      Id  string
-      Url string
-   } `json:"text_track_urls"`
+   TextTrackUrls []TextTrack`json:"text_track_urls"`
    Url           string // MPD
 }
