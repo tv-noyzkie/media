@@ -19,6 +19,12 @@ import (
    "strings"
 )
 
+type License struct {
+   ClientId string
+   PrivateKey string
+   Widevine func([]byte) ([]byte, error)
+}
+
 func get(u *url.URL, head http.Header) ([]byte, error) {
    req := http.Request{Method: "GET", URL: u}
    if head != nil {
@@ -116,12 +122,6 @@ func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
 func init() {
    http.DefaultClient.Transport = transport{}
    log.SetFlags(log.Ltime)
-}
-
-type License struct {
-   ClientId string
-   PrivateKey string
-   Widevine func([]byte) ([]byte, error)
 }
 
 func (e *License) get_key(head *header) ([]byte, error) {

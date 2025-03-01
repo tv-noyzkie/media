@@ -34,34 +34,6 @@ type Auth struct {
    }
 }
 
-func (a *Auth) Unauth() error {
-   req, _ := http.NewRequest("POST", "https://gw.cds.amcn.com", nil)
-   req.URL.Path = "/auth-orchestration-id/api/v1/unauth"
-   req.Header = http.Header{
-      "x-amcn-device-id": {"-"},
-      "x-amcn-language": {"en"},
-      "x-amcn-network": {"amcplus"},
-      "x-amcn-platform": {"web"},
-      "x-amcn-tenant": {"amcn"},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   return json.NewDecoder(resp.Body).Decode(a)
-}
-
-type Source struct {
-   KeySystems *struct {
-      Widevine struct {
-         LicenseUrl string `json:"license_url"`
-      } `json:"com.widevine.alpha"`
-   } `json:"key_systems"`
-   Src string // MPD
-   Type string
-}
-
 func (a *Auth) Playback(web Address) (*Playback, error) {
    data, err := json.Marshal(map[string]any{
       "adtags": map[string]any{
@@ -108,17 +80,6 @@ func (a *Auth) Playback(web Address) (*Playback, error) {
    return &play, nil
 }
 
-type Playback struct {
-   Header http.Header
-   Body struct {
-      Data struct {
-         PlaybackJsonData struct {
-            Sources []Source
-         }
-      }
-   }
-}
-
 func (p *Playback) Dash() (*Source, bool) {
    for _, source1 := range p.Body.Data.PlaybackJsonData.Sources {
       if source1.Type == "application/dash+xml" {
@@ -128,9 +89,27 @@ func (p *Playback) Dash() (*Source, bool) {
    return nil, false
 }
 
-///
+type Byte[T any] []byte
 
-func (a *Auth) Login(email, password string) ([]byte, error) {
+func (a *Auth) Unauth() error {
+   req, _ := http.NewRequest("POST", "https://gw.cds.amcn.com", nil)
+   req.URL.Path = "/auth-orchestration-id/api/v1/unauth"
+   req.Header = http.Header{
+      "x-amcn-device-id": {"-"},
+      "x-amcn-language": {"en"},
+      "x-amcn-network": {"amcplus"},
+      "x-amcn-platform": {"web"},
+      "x-amcn-tenant": {"amcn"},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   return json.NewDecoder(resp.Body).Decode(a)
+}
+
+func (a *Auth) Login(email, password string) (Byte[Auth], error) {
    data, err := json.Marshal(map[string]string{
       "email": email,
       "password": password,
@@ -163,13 +142,10 @@ func (a *Auth) Login(email, password string) ([]byte, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      return nil, errors.New(resp.Status)
-   }
    return io.ReadAll(resp.Body)
 }
 
-func (a *Auth) Refresh() ([]byte, error) {
+func (a *Auth) Refresh() (Byte[Auth], error) {
    req, _ := http.NewRequest("POST", "https://gw.cds.amcn.com", nil)
    req.URL.Path = "/auth-orchestration-id/api/v1/refresh"
    req.Header.Set("authorization", "Bearer " + a.Data.RefreshToken)
@@ -178,28 +154,48 @@ func (a *Auth) Refresh() ([]byte, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      return nil, errors.New(resp.Status)
-   }
    return io.ReadAll(resp.Body)
 }
 
-func (a *Auth) Unmarshal(data []byte) error {
+func (a *Auth) Unmarshal(data Byte[Auth]) error {
    return json.Unmarshal(data, a)
 }
 
-func (c *Client) License(data []byte) ([]byte, error) {
-   req, err := http.NewRequest(
-      "POST", c.Source.KeySystems.Widevine.LicenseUrl, bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
+type Source struct {
+   KeySystems *struct {
+      Widevine struct {
+         LicenseUrl string `json:"license_url"`
+      } `json:"com.widevine.alpha"`
+   } `json:"key_systems"`
+   Src string // MPD
+   Type string
+}
+
+type Playback struct {
+   Header http.Header
+   Body struct {
+      Data struct {
+         PlaybackJsonData struct {
+            Sources []Source
+         }
+      }
    }
-   req.Header.Set("bcov-auth", c.Header.Get("x-amcn-bc-jwt"))
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
+}
+
+func (p *Playback) Widevine(s *Source) func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      req, err := http.NewRequest(
+         "POST", s.KeySystems.Widevine.LicenseUrl, bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      req.Header.Set("bcov-auth", p.Header.Get("x-amcn-bc-jwt"))
+      resp, err := http.DefaultClient.Do(req)
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
    }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
