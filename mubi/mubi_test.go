@@ -36,14 +36,15 @@ var tests = []struct{
       },
    },
    {
-      url: "https://mubi.com/films/close-2022",
+      url: "mubi.com/films/perfect-days",
       locations: []string{
+         "Austria",
          "Brazil",
          "Chile",
          "Colombia",
+         "Germany",
          "Ireland",
          "Mexico",
-         "Netherlands",
          "Peru",
          "Turkey",
          "United Kingdom",
