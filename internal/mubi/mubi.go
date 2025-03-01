@@ -25,29 +25,12 @@ func (f *flags) New() error {
 
 type flags struct {
    address        mubi.Address
+   auth           bool
+   code           bool
    e              internal.License
    media          string
    representation string
-   auth           bool
-   code           bool
-}
-
-func timed_text(url string) error {
-   resp, err := http.Get(url)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   file, err := os.Create(".vtt")
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   _, err = file.ReadFrom(resp.Body)
-   if err != nil {
-      return err
-   }
-   return nil
+   text           bool
 }
 
 func main() {
@@ -58,24 +41,30 @@ func main() {
    }
    flag.Var(&f.address, "a", "address")
    flag.BoolVar(&f.auth, "auth", false, "authenticate")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
    flag.BoolVar(&f.code, "code", false, "link code")
    flag.StringVar(&f.representation, "i", "", "representation")
-   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
    flag.StringVar(&f.e.PrivateKey, "p", f.e.PrivateKey, "private key")
+   flag.BoolVar(&f.text, "text", false, "text track")
    flag.Parse()
    switch {
    case f.code:
-      err := f.write_code()
+      err := f.do_code()
       if err != nil {
          panic(err)
       }
    case f.auth:
-      err := f.write_auth()
+      err := f.do_auth()
+      if err != nil {
+         panic(err)
+      }
+   case f.text:
+      err := f.do_text()
       if err != nil {
          panic(err)
       }
    case f.address[0] != "":
-      err := f.download()
+      err := f.do_dash()
       if err != nil {
          panic(err)
       }
@@ -85,11 +74,11 @@ func main() {
 }
 
 func (f *flags) write_file(name string, data []byte) error {
-   log.Println("WriteFile", f.media + name)
-   return os.WriteFile(f.media + name, data, os.ModePerm)
+   log.Println("WriteFile", f.media+name)
+   return os.WriteFile(f.media+name, data, os.ModePerm)
 }
 
-func (f *flags) write_code() error {
+func (f *flags) do_code() error {
    data, err := mubi.NewLinkCode()
    if err != nil {
       return err
@@ -103,57 +92,83 @@ func (f *flags) write_code() error {
    return f.write_file("/mubi/LinkCode", data)
 }
 
-///
-
-func (f *flags) download() error {
-   data, err := os.ReadFile(f.address.String() + ".txt")
+func (f *flags) do_auth() error {
+   data, err := os.ReadFile(f.media + "/mubi/LinkCode")
    if err != nil {
       return err
    }
-   var secure mubi.SecureUrl
-   err = secure.Unmarshal(data)
+   var code mubi.LinkCode
+   err = code.Unmarshal(data)
    if err != nil {
       return err
    }
-   for _, text := range secure.TextTrackUrls {
-      switch f.representation {
-      case "":
-         fmt.Print(&text, "\n\n")
-      case text.Id:
-         return timed_text(text.Url)
-      }
-   }
-   // github.com/golang/go/issues/18639
-   // we dont need this until later, but you have to call before the first
-   // request in the program
-   os.Setenv("GODEBUG", "http2client=0")
-   represents, err := internal.Mpd(&secure)
+   data, err = code.Authenticate()
    if err != nil {
       return err
    }
-   for _, represent := range represents {
-      switch f.representation {
-      case "":
-         fmt.Print(&represent, "\n\n")
-      case represent.Id:
-         data, err = os.ReadFile(f.media + "/mubi.txt")
-         if err != nil {
-            return err
-         }
-         var auth mubi.Authenticate
-         err = auth.Unmarshal(data)
-         if err != nil {
-            return err
-         }
-         f.e.Client = &auth
-         return f.e.Download(&represent)
-      }
-   }
-   return nil
+   return f.write_file("/mubi/Authenticate", data)
 }
 
-func (f *flags) write_secure() error {
-   data, err := os.ReadFile(f.media + "/mubi.txt")
+func (f *flags) do_text() error {
+   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
+   if err != nil {
+      return err
+   }
+   var auth mubi.Authenticate
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   film, err := f.address.Film()
+   if err != nil {
+      return err
+   }
+   secure, err := auth.SecureUrl(film)
+   if err != nil {
+      return err
+   }
+   for i, text := range secure.TextTrackUrls {
+      switch f.representation {
+      case "":
+         if i >= 1 {
+            fmt.Println()
+         }
+         fmt.Println(&text)
+      case text.Id:
+         resp, err := http.Get(text.Url)
+         if err != nil {
+            return err
+         }
+         defer resp.Body.Close()
+         file, err := os.Create(".vtt")
+         if err != nil {
+            return err
+         }
+         defer file.Close()
+         _, err = file.ReadFrom(resp.Body)
+         if err != nil {
+            return err
+         }
+         return nil
+      }
+   }
+}
+
+func (f *flags) do_dash() error {
+   if f.representation != "" {
+      data, err = os.ReadFile(f.media + "/mubi.txt")
+      if err != nil {
+         return err
+      }
+      var auth mubi.Authenticate
+      err = auth.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Client = &auth
+      return f.e.Download(&represent)
+   }
+   data, err := os.ReadFile(f.media + "/mubi/Authenticate")
    if err != nil {
       return err
    }
@@ -170,26 +185,24 @@ func (f *flags) write_secure() error {
    if err != nil {
       return err
    }
-   data, err = mubi.SecureUrl{}.Marshal(&auth, film)
+   secure, err := auth.SecureUrl(film)
    if err != nil {
       return err
    }
-   return os.WriteFile(f.address.String()+".txt", data, os.ModePerm)
-}
-
-func (f *flags) write_auth() error {
-   data, err := os.ReadFile("code.txt")
-   if err != nil {
-      return err
+   for i, text := range secure.TextTrackUrls {
+      switch f.representation {
+      case "":
+         if i >= 1 {
+            fmt.Println()
+         }
+         fmt.Println(&text)
+      case text.Id:
+         return timed_text(text.Url)
+      }
    }
-   var code mubi.LinkCode
-   err = code.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = mubi.Authenticate{}.Marshal(&code)
-   if err != nil {
-      return err
-   }
-   return os.WriteFile(f.media+"/mubi.txt", data, os.ModePerm)
+   // github.com/golang/go/issues/18639
+   // we dont need this until later, but you have to call before the first
+   // request in the program
+   os.Setenv("GODEBUG", "http2client=0")
+   represents, err := internal.Mpd(&secure)
 }
