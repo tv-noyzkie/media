@@ -9,16 +9,20 @@ import (
    "strings"
 )
 
-const user_agent = "trc-googletv; production; 0"
-
-type AccountToken struct {
-   AuthToken string
-}
-
-func (a *AccountToken) Code(act *Activation) (Byte[Code], error) {
-   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
-   req.URL.Path = "/api/v1/account/activation/" + act.Code
+func (a *AccountToken) Activation() (Byte[Activation], error) {
+   data, err := json.Marshal(map[string]string{"platform": "googletv"})
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
    req.Header = http.Header{
+      "content-type":         {"application/json"},
       "user-agent":           {user_agent},
       "x-roku-content-token": {a.AuthToken},
    }
@@ -34,20 +38,16 @@ func (a *AccountToken) Unmarshal(data Byte[AccountToken]) error {
    return json.Unmarshal(data, a)
 }
 
-func (a *AccountToken) Activation() (Byte[Activation], error) {
-   data, err := json.Marshal(map[string]string{"platform": "googletv"})
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://googletv.web.roku.com/api/v1/account/activation",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
+const user_agent = "trc-googletv; production; 0"
+
+type AccountToken struct {
+   AuthToken string
+}
+
+func (a *AccountToken) Code(act *Activation) (Byte[Code], error) {
+   req, _ := http.NewRequest("", "https://googletv.web.roku.com", nil)
+   req.URL.Path = "/api/v1/account/activation/" + act.Code
    req.Header = http.Header{
-      "content-type":         {"application/json"},
       "user-agent":           {user_agent},
       "x-roku-content-token": {a.AuthToken},
    }

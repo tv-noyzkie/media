@@ -68,38 +68,34 @@ func main() {
    }
 }
 
-///
-
 func write_code() error {
-   var token roku.Token
-   data, err := token.Marshal(nil)
+   data, err := roku.Code.AccountToken(nil)
    if err != nil {
       return err
    }
-   err = os.WriteFile("token.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
+   var token roku.AccountToken
    err = token.Unmarshal(data)
    if err != nil {
       return err
    }
+   err = os.WriteFile("AccountToken", data, os.ModePerm)
+   if err != nil {
+      return err
+   }
+   data, err = token.Activation()
+   if err != nil {
+      return err
+   }
    var activation roku.Activation
-   data, err = activation.Marshal(&token)
-   if err != nil {
-      return err
-   }
-   err = os.WriteFile("activation.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
    err = activation.Unmarshal(data)
    if err != nil {
       return err
    }
    fmt.Println(activation)
-   return nil
+   return os.WriteFile("Activation", data, os.ModePerm)
 }
+
+///
 
 func (f *flags) download() error {
    if f.representation != "" {
