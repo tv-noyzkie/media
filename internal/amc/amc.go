@@ -5,10 +5,61 @@ import (
    "41.neocities.org/media/internal"
    "errors"
    "flag"
-   "fmt"
+   "log"
+   "net/http"
    "os"
    "path/filepath"
 )
+
+func (f *flags) download() error {
+   data, err := os.ReadFile(f.media + "/amc/Auth")
+   if err != nil {
+      return err
+   }
+   var auth amc.Auth
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data, err = auth.Refresh()
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/amc.txt", data)
+   if err != nil {
+      return err
+   }
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   play, err := auth.Playback(f.address)
+   if err != nil {
+      return err
+   }
+   source, ok := play.Dash()
+   if !ok {
+      return errors.New(".Dash()")
+   }
+   if f.representation != "" {
+      f.e.Widevine = play.Widevine(source)
+      return f.e.Download(f.media + "/Mpd", f.representation)
+   }
+   resp, err := http.Get(source.Src)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media + "/Mpd", resp)
+}
+
+type flags struct {
+   address        amc.Address
+   e              internal.License
+   email          string
+   media           string
+   password       string
+   representation string
+}
 
 func main() {
    var f flags
@@ -20,8 +71,8 @@ func main() {
    flag.StringVar(&f.email, "e", "", "email")
    flag.StringVar(&f.representation, "i", "", "representation")
    flag.StringVar(&f.password, "p", "", "password")
-   flag.StringVar(&f.s.ClientId, "c", f.s.ClientId, "client ID")
-   flag.StringVar(&f.s.PrivateKey, "k", f.s.PrivateKey, "private key")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.e.PrivateKey, "k", f.e.PrivateKey, "private key")
    flag.Parse()
    switch {
    case f.email != "":
@@ -39,67 +90,21 @@ func main() {
    }
 }
 
-type flags struct {
-   address        amc.Address
-   email          string
-   home           string
-   password       string
-   representation string
-   s              internal.Stream
-}
-
 func (f *flags) New() error {
    var err error
-   f.home, err = os.UserHomeDir()
+   f.media, err = os.UserHomeDir()
    if err != nil {
       return err
    }
-   f.home = filepath.ToSlash(f.home)
-   f.s.ClientId = f.home + "/widevine/client_id.bin"
-   f.s.PrivateKey = f.home + "/widevine/private_key.pem"
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
    return nil
 }
-func (f *flags) download() error {
-   data, err := os.ReadFile(f.home + "/amc.txt")
-   if err != nil {
-      return err
-   }
-   var auth amc.Auth
-   err = auth.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data, err = auth.Refresh()
-   if err != nil {
-      return err
-   }
-   os.WriteFile(f.home+"/amc.txt", data, os.ModePerm)
-   err = auth.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   play, err := auth.Playback(f.address)
-   if err != nil {
-      return err
-   }
-   client, ok := play.Dash()
-   if !ok {
-      return errors.New("Playback.Dash")
-   }
-   represents, err := internal.Mpd(client)
-   if err != nil {
-      return err
-   }
-   for _, represent := range represents {
-      switch f.representation {
-      case "":
-         fmt.Print(&represent, "\n\n")
-      case represent.Id:
-         f.s.Client = client
-         return f.s.Download(&represent)
-      }
-   }
-   return nil
+
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
 }
 
 func (f *flags) login() error {
@@ -112,5 +117,5 @@ func (f *flags) login() error {
    if err != nil {
       return err
    }
-   return os.WriteFile(f.home+"/amc.txt", data, os.ModePerm)
+   return f.write_file("/amc/Auth", data)
 }
