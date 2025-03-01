@@ -11,9 +11,13 @@ import (
    "strings"
 )
 
-func (a Authenticate) Playlist(link *DeepLink) (*Playlist, error) {
+func (p *Playlist) Unmarshal(data Byte[Playlist]) error {
+   return json.Unmarshal(data, p)
+}
+
+func (a Authenticate) Playlist(deep *DeepLink) (Byte[Playlist], error) {
    data, err := json.Marshal(map[string]any{
-      "content_eab_id": link.EabId,
+      "content_eab_id": deep.EabId,
       "deejay_device_id": 166,
       "unencrypted": true,
       "version": 9999999,
@@ -95,17 +99,7 @@ func (a Authenticate) Playlist(link *DeepLink) (*Playlist, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var b bytes.Buffer
-      resp.Write(&b)
-      return nil, errors.New(b.String())
-   }
-   play := &Playlist{}
-   err = json.NewDecoder(resp.Body).Decode(play)
-   if err != nil {
-      return nil, err
-   }
-   return play, nil
+   return io.ReadAll(resp.Body)
 }
 
 type Byte[T any] []byte
@@ -135,19 +129,6 @@ func (a *Authenticate) Unmarshal(data Byte[Authenticate]) error {
    return json.Unmarshal(data, a)
 }
 
-func (p *Playlist) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      resp, err := http.Post(
-         p.WvServer, "application/x-protobuf", bytes.NewReader(data),
-      )
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
-}
-
 type Authenticate struct {
    Data struct {
       UserToken string `json:"user_token"`
@@ -159,11 +140,6 @@ type DeepLink struct {
 }
 
 type Entity [1]string
-
-type Playlist struct {
-   StreamUrl string `json:"stream_url"` // MPD
-   WvServer  string `json:"wv_server"`
-}
 
 func (e Entity) String() string {
    return e[0]
@@ -188,13 +164,30 @@ func (a Authenticate) DeepLink(id Entity) (*DeepLink, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   var link DeepLink
-   err = json.NewDecoder(resp.Body).Decode(&link)
+   var deep DeepLink
+   err = json.NewDecoder(resp.Body).Decode(&deep)
    if err != nil {
       return nil, err
    }
-   if link.EabId == "" {
+   if deep.EabId == "" {
       return nil, errors.New("eab_id")
    }
-   return &link, nil
+   return &deep, nil
+}
+func (p *Playlist) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      resp, err := http.Post(
+         p.WvServer, "application/x-protobuf", bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      return io.ReadAll(resp.Body)
+   }
+}
+
+type Playlist struct {
+   StreamUrl string `json:"stream_url"` // MPD
+   WvServer  string `json:"wv_server"`
 }

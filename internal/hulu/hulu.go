@@ -4,8 +4,8 @@ import (
    "41.neocities.org/media/hulu"
    "41.neocities.org/media/internal"
    "flag"
-   "fmt"
    "log"
+   "net/http"
    "os"
    "path/filepath"
 )
@@ -13,7 +13,7 @@ import (
 type flags struct {
    e              internal.License
    email          string
-   entity         hulu.EntityId
+   entity         hulu.Entity
    media          string
    password       string
    representation string
@@ -60,11 +60,6 @@ func main() {
    }
 }
 
-func (f *flags) write_file(name string, data []byte) error {
-   log.Println("WriteFile", f.media + name)
-   return os.WriteFile(f.media + name, data, os.ModePerm)
-}
-
 func (f *flags) authenticate() error {
    data, err := hulu.NewAuthenticate(f.email, f.password)
    if err != nil {
@@ -73,10 +68,24 @@ func (f *flags) authenticate() error {
    return f.write_file("/hulu/Authenticate", data)
 }
 
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
+}
+
 func (f *flags) download() error {
    if f.representation != "" {
-      f.e.Client = play
-      return f.e.Download(&represent)
+      data, err := os.ReadFile(f.media + "/hulu/Playlist")
+      if err != nil {
+         return err
+      }
+      var play hulu.Playlist
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Widevine = play.Widevine()
+      return f.e.Download(f.media + "/Mpd", f.representation)
    }
    data, err := os.ReadFile(f.media + "/hulu/Authenticate")
    if err != nil {
@@ -87,14 +96,26 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   
-   deep, err := auth.DeepLink(&f.entity)
+   deep, err := auth.DeepLink(f.entity)
    if err != nil {
       return err
    }
-   play, err := auth.Playlist(deep)
+   data1, err := auth.Playlist(deep)
    if err != nil {
       return err
    }
-   represents, err := internal.Mpd(play)
+   err = f.write_file("/hulu/Playlist", data1)
+   if err != nil {
+      return err
+   }
+   var play hulu.Playlist
+   err = play.Unmarshal(data1)
+   if err != nil {
+      return err
+   }
+   resp, err := http.Get(play.StreamUrl)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media + "/Mpd", resp)
 }

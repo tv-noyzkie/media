@@ -11,36 +11,44 @@ import (
    "strings"
 )
 
+func (s status) Error() string {
+   return strings.ToLower(s[0])
+}
+
+var forbidden = status{"HTTP Status 403 – Forbidden"}
+
+func (t *TextTrack) String() string {
+   return "id = " + t.Id
+}
+
+type status [1]string
+
+type Authenticate struct {
+   Token string
+   User  struct {
+      Id int
+   }
+}
+
+type SecureUrl struct {
+   TextTrackUrls []TextTrack `json:"text_track_urls"`
+   Url           string // MPD
+}
+
+type TextTrack struct {
+   Id  string
+   Url string
+}
+
+type LinkCode struct {
+   AuthToken string `json:"auth_token"`
+   LinkCode  string `json:"link_code"`
+}
+
 type Film struct {
    Id    int64
    Title string
    Year  int
-}
-
-func (SecureUrl) Marshal(auth *Authenticate, film1 *Film) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/v3/films/")
-      b = strconv.AppendInt(b, film1.Id, 10)
-      b = append(b, "/viewing/secure_url"...)
-      return string(b)
-   }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + auth.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
 }
 
 var ClientCountry = "US"
@@ -64,10 +72,6 @@ func (a *Address) Set(data string) error {
 }
 
 type Address [1]string
-
-func (a *Authenticate) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, a)
-}
 
 func (a Address) Film() (*Film, error) {
    req, _ := http.NewRequest("", "https://api.mubi.com", nil)
@@ -125,6 +129,48 @@ func (a *Authenticate) Viewing(film1 *Film) error {
    return nil
 }
 
+func (c *LinkCode) String() string {
+   var b strings.Builder
+   b.WriteString("TO LOG IN AND START WATCHING\n")
+   b.WriteString("Go to\n")
+   b.WriteString("mubi.com/android\n")
+   b.WriteString("and enter the code below\n")
+   b.WriteString(c.LinkCode)
+   return b.String()
+}
+
+///
+
+func (SecureUrl) Marshal(auth *Authenticate, film1 *Film) ([]byte, error) {
+   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/v3/films/")
+      b = strconv.AppendInt(b, film1.Id, 10)
+      b = append(b, "/viewing/secure_url"...)
+      return string(b)
+   }()
+   req.Header = http.Header{
+      "authorization":  {"Bearer " + auth.Token},
+      "client":         {client},
+      "client-country": {ClientCountry},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func (a *Authenticate) Unmarshal(data []byte) error {
+   return json.Unmarshal(data, a)
+}
+
 func (LinkCode) Marshal() ([]byte, error) {
    req, _ := http.NewRequest("", "https://api.mubi.com/v3/link_code", nil)
    req.Header = http.Header{
@@ -142,13 +188,6 @@ func (LinkCode) Marshal() ([]byte, error) {
       return nil, errors.New(data.String())
    }
    return io.ReadAll(resp.Body)
-}
-
-type Authenticate struct {
-   Token string
-   User  struct {
-      Id int
-   }
 }
 
 func (Authenticate) Marshal(code *LinkCode) ([]byte, error) {
@@ -180,34 +219,12 @@ func (Authenticate) Marshal(code *LinkCode) ([]byte, error) {
    return io.ReadAll(resp.Body)
 }
 
-func (c *LinkCode) String() string {
-   var b strings.Builder
-   b.WriteString("TO LOG IN AND START WATCHING\n")
-   b.WriteString("Go to\n")
-   b.WriteString("mubi.com/android\n")
-   b.WriteString("and enter the code below\n")
-   b.WriteString(c.LinkCode)
-   return b.String()
-}
-
 func (c *LinkCode) Unmarshal(data []byte) error {
    return json.Unmarshal(data, c)
 }
 
 func (s *SecureUrl) Unmarshal(data []byte) error {
    return json.Unmarshal(data, s)
-}
-
-func (s status) Error() string {
-   return strings.ToLower(s[0])
-}
-
-type status [1]string
-
-var forbidden = status{"HTTP Status 403 – Forbidden"}
-
-func (t *TextTrack) String() string {
-   return "id = " + t.Id
 }
 
 func (a *Authenticate) License(data []byte) ([]byte, error) {
@@ -248,23 +265,4 @@ func (a *Authenticate) License(data []byte) ([]byte, error) {
       return nil, err
    }
    return value.License, nil
-}
-
-type LinkCode struct {
-   AuthToken string `json:"auth_token"`
-   LinkCode  string `json:"link_code"`
-}
-
-type TextTrack struct {
-   Id  string
-   Url string
-}
-
-type SecureUrl struct {
-   TextTrackUrls []TextTrack `json:"text_track_urls"`
-   Url           string
-}
-
-func (s *SecureUrl) Mpd() (*http.Response, error) {
-   return http.Get(s.Url)
 }
