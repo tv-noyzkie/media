@@ -146,11 +146,8 @@ func (a Address) Film() (*Film, error) {
    return film1, nil
 }
 
-// Mubi do this sneaky thing. you cannot download a video unless you have told
-// the API that you are watching it. so you have to call
-// `/v3/films/%v/viewing`, otherwise it wont let you get the MPD. if you have
-// already viewed the video on the website that counts, but if you only use the
-// tool it will error
+// to get the MPD you have to call this or view video on the website. request
+// is geo blocked only the first time
 func (a *Authenticate) Viewing(film1 *Film) error {
    req, _ := http.NewRequest("POST", "https://api.mubi.com", nil)
    req.URL.Path = func() string {
@@ -159,25 +156,23 @@ func (a *Authenticate) Viewing(film1 *Film) error {
       b = append(b, "/viewing"...)
       return string(b)
    }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + a.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
+   req.Header.Set("client", client)
+   req.Header.Set("client-country", ClientCountry)
+   req.Header.Set("authorization", "Bearer " + a.Token)
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return err
    }
    defer resp.Body.Close()
    var value struct {
-      Message string
+      UserMessage string `json:"user_message"`
    }
    err = json.NewDecoder(resp.Body).Decode(&value)
    if err != nil {
       return err
    }
-   if value.Message != "" {
-      return errors.New(value.Message)
+   if value.UserMessage != "" {
+      return errors.New(value.UserMessage)
    }
    return nil
 }

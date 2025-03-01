@@ -19,6 +19,24 @@ import (
    "strings"
 )
 
+func init() {
+   log.SetFlags(log.Ltime)
+   // github.com/golang/go/issues/18639
+   var pro http.Protocols
+   pro.SetHTTP1(true)
+   http.DefaultClient.Transport = &transport{
+      Protocols: &pro,
+      Proxy: http.ProxyFromEnvironment,
+   }
+}
+
+type transport http.Transport
+
+func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+   log.Println(req.Method, req.URL)
+   return (*http.Transport)(t).RoundTrip(req)
+}
+
 type License struct {
    ClientId string
    PrivateKey string
@@ -110,18 +128,6 @@ func Mpd(name string, resp *http.Response) error {
       fmt.Println(&represent)
    }
    return nil
-}
-
-type transport struct{}
-
-func (transport) RoundTrip(req *http.Request) (*http.Response, error) {
-   log.Println(req.Method, req.URL)
-   return http.DefaultTransport.RoundTrip(req)
-}
-
-func init() {
-   http.DefaultClient.Transport = transport{}
-   log.SetFlags(log.Ltime)
 }
 
 func (e *License) get_key(head *header) ([]byte, error) {

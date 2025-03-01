@@ -15,6 +15,25 @@ import (
    "strings"
 )
 
+func (i *Item) Mpd() (*http.Response, error) {
+   req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/s/")
+      b = append(b, i.CmsAccountId...)
+      b = append(b, "/media/guid/"...)
+      b = strconv.AppendInt(b, cms_account(i.CmsAccountId), 10)
+      b = append(b, '/')
+      b = append(b, i.ContentId...)
+      return string(b)
+   }()
+   req.URL.RawQuery = url.Values{
+      "assetTypes": {i.AssetType},
+      "formats":    {"MPEG-DASH"},
+   }.Encode()
+   req.Header.Set("vpn", "true")
+   return http.DefaultClient.Do(req)
+}
+
 func (s *Session) Widevine(data []byte) ([]byte, error) {
    req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
    if err != nil {
@@ -125,25 +144,6 @@ func (a AppSecret) At() (At, error) {
    data1 = append(data1, iv[:]...)
    data1 = append(data1, data...)
    return At(base64.StdEncoding.EncodeToString(data1)), nil
-}
-
-func (i *Item) Mpd() (*http.Response, error) {
-   req, _ := http.NewRequest("", "https://link.theplatform.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/s/")
-      b = append(b, i.CmsAccountId...)
-      b = append(b, "/media/guid/"...)
-      b = strconv.AppendInt(b, cms_account(i.CmsAccountId), 10)
-      b = append(b, '/')
-      b = append(b, i.ContentId...)
-      return string(b)
-   }()
-   req.URL.RawQuery = url.Values{
-      "assetTypes": {i.AssetType},
-      "formats":    {"MPEG-DASH"},
-   }.Encode()
-   req.Header.Set("vpn", "true")
-   return http.DefaultClient.Do(req)
 }
 
 func (a At) Item(cid string) (*Item, error) {
