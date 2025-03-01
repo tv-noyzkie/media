@@ -34,6 +34,10 @@ type flags struct {
 }
 
 func main() {
+   // github.com/golang/go/issues/18639
+   // we dont need this until later, but you have to call before the first
+   // request in the program
+   os.Setenv("GODEBUG", "http2client=0")
    var f flags
    err := f.New()
    if err != nil {
@@ -152,11 +156,12 @@ func (f *flags) do_text() error {
          return nil
       }
    }
+   return nil
 }
 
 func (f *flags) do_dash() error {
    if f.representation != "" {
-      data, err = os.ReadFile(f.media + "/mubi.txt")
+      data, err := os.ReadFile(f.media + "/mubi/Authenticate")
       if err != nil {
          return err
       }
@@ -165,8 +170,10 @@ func (f *flags) do_dash() error {
       if err != nil {
          return err
       }
-      f.e.Client = &auth
-      return f.e.Download(&represent)
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return auth.Widevine(data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.representation)
    }
    data, err := os.ReadFile(f.media + "/mubi/Authenticate")
    if err != nil {
@@ -189,20 +196,9 @@ func (f *flags) do_dash() error {
    if err != nil {
       return err
    }
-   for i, text := range secure.TextTrackUrls {
-      switch f.representation {
-      case "":
-         if i >= 1 {
-            fmt.Println()
-         }
-         fmt.Println(&text)
-      case text.Id:
-         return timed_text(text.Url)
-      }
+   resp, err := http.Get(secure.Url)
+   if err != nil {
+      return err
    }
-   // github.com/golang/go/issues/18639
-   // we dont need this until later, but you have to call before the first
-   // request in the program
-   os.Setenv("GODEBUG", "http2client=0")
-   represents, err := internal.Mpd(&secure)
+   return internal.Mpd(f.media + "/Mpd", resp)
 }
