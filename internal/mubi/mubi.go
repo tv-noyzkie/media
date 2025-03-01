@@ -13,9 +13,12 @@ import (
 
 func main() {
    // github.com/golang/go/issues/18639
-   // we dont need this until later, but you have to call before the first
-   // request in the program
-   os.Setenv("GODEBUG", "http2client=0")
+   var pro http.Protocols
+   pro.SetHTTP1(true)
+   http.DefaultClient.Transport = &http.Transport{
+      Protocols: &pro,
+      Proxy: http.ProxyFromEnvironment,
+   }
    var f flags
    err := f.New()
    if err != nil {
@@ -86,8 +89,63 @@ func (f *flags) do_auth() error {
    return f.write_file("/mubi/Authenticate", data)
 }
 
+func (f *flags) New() error {
+   var err error
+   f.media, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
+   return nil
+}
+
+type flags struct {
+   address        mubi.Address
+   auth           bool
+   code           bool
+   e              internal.License
+   media          string
+   representation string
+   text           bool
+}
+
 func (f *flags) do_dash() error {
    if f.representation != "" {
+      if f.text {
+         data, err := os.ReadFile(f.media + "/mubi/SecureUrl")
+         if err != nil {
+            return err
+         }
+         var secure mubi.SecureUrl
+         err = secure.Unmarshal(data)
+         if err != nil {
+            return err
+         }
+         for _, text := range secure.TextTrackUrls {
+            err = func() error {
+               resp, err := http.Get(text.Url)
+               if err != nil {
+                  return err
+               }
+               defer resp.Body.Close()
+               file, err := os.Create(text.Base())
+               if err != nil {
+                  return err
+               }
+               defer file.Close()
+               _, err = file.ReadFrom(resp.Body)
+               if err != nil {
+                  return err
+               }
+               return nil
+            }()
+            if err != nil {
+               return err
+            }
+         }
+      }
       data, err := os.ReadFile(f.media + "/mubi/Authenticate")
       if err != nil {
          return err
@@ -119,60 +177,22 @@ func (f *flags) do_dash() error {
    if err != nil {
       return err
    }
-   secure, err := auth.SecureUrl(film)
+   data, err = auth.SecureUrl(film)
    if err != nil {
       return err
    }
-   if f.text {
-      for _, text := range secure.TextTrackUrls {
-         err = func() error {
-            resp, err := http.Get(text.Url)
-            if err != nil {
-               return err
-            }
-            defer resp.Body.Close()
-            file, err := os.Create(text.Base())
-            if err != nil {
-               return err
-            }
-            defer file.Close()
-            _, err = file.ReadFrom(resp.Body)
-            if err != nil {
-               return err
-            }
-            return nil
-         }()
-         if err != nil {
-            return err
-         }
-      }
-      return nil
+   err = f.write_file("/mubi/SecureUrl", data)
+   if err != nil {
+      return err
+   }
+   var secure mubi.SecureUrl
+   err = secure.Unmarshal(data)
+   if err != nil {
+      return err
    }
    resp, err := http.Get(secure.Url)
    if err != nil {
       return err
    }
    return internal.Mpd(f.media + "/Mpd", resp)
-}
-
-func (f *flags) New() error {
-   var err error
-   f.media, err = os.UserHomeDir()
-   if err != nil {
-      return err
-   }
-   f.media = filepath.ToSlash(f.media) + "/media"
-   f.e.ClientId = f.media + "/client_id.bin"
-   f.e.PrivateKey = f.media + "/private_key.pem"
-   return nil
-}
-
-type flags struct {
-   address        mubi.Address
-   auth           bool
-   code           bool
-   e              internal.License
-   media          string
-   representation string
-   text           bool
 }

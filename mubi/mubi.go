@@ -12,6 +12,37 @@ import (
    "strings"
 )
 
+func (s *SecureUrl) Unmarshal(data Byte[SecureUrl]) error {
+   return json.Unmarshal(data, s)
+}
+
+type SecureUrl struct {
+   TextTrackUrls []TextTrack`json:"text_track_urls"`
+   Url           string // MPD
+}
+
+// geo block
+func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
+   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/v3/films/")
+      b = strconv.AppendInt(b, film1.Id, 10)
+      b = append(b, "/viewing/secure_url"...)
+      return string(b)
+   }()
+   req.Header = http.Header{
+      "authorization":  {"Bearer " + a.Token},
+      "client":         {client},
+      "client-country": {ClientCountry},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (t *TextTrack) Base() string {
    return path.Base(t.Url)
 }
@@ -179,33 +210,6 @@ type Authenticate struct {
    }
 }
 
-// geo block
-func (a *Authenticate) SecureUrl(film1 *Film) (*SecureUrl, error) {
-   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/v3/films/")
-      b = strconv.AppendInt(b, film1.Id, 10)
-      b = append(b, "/viewing/secure_url"...)
-      return string(b)
-   }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + a.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   secure := &SecureUrl{}
-   err = json.NewDecoder(resp.Body).Decode(secure)
-   if err != nil {
-      return nil, err
-   }
-   return secure, nil
-}
-
 func (c *LinkCode) Authenticate() (Byte[Authenticate], error) {
    data, err := json.Marshal(map[string]string{"auth_token": c.AuthToken})
    if err != nil {
@@ -249,8 +253,3 @@ func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
 }
 
 type Address [1]string
-
-type SecureUrl struct {
-   TextTrackUrls []TextTrack`json:"text_track_urls"`
-   Url           string // MPD
-}
