@@ -15,6 +15,23 @@ import (
    "strings"
 )
 
+func (s *Session) Widevine(data []byte) ([]byte, error) {
+   req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
+   if err != nil {
+      return nil, err
+   }
+   req.Header = http.Header{
+      "authorization": {"Bearer " + s.LsSession},
+      "content-type":  {"application/x-protobuf"},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 type Item struct {
    AssetType    string
    CmsAccountId string
@@ -86,25 +103,6 @@ func cms_account(id string) int64 {
 type Session struct {
    LsSession string `json:"ls_session"`
    Url       string
-}
-
-func (s *Session) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      req, err := http.NewRequest("POST", s.Url, bytes.NewReader(data))
-      if err != nil {
-         return nil, err
-      }
-      req.Header = http.Header{
-         "authorization": {"Bearer " + s.LsSession},
-         "content-type":  {"application/x-protobuf"},
-      }
-      resp, err := http.DefaultClient.Do(req)
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
 }
 
 type At string

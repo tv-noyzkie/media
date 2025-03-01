@@ -50,6 +50,7 @@ func main() {
       flag.Usage()
    }
 }
+
 type flags struct {
    address        mubi.Address
    auth           bool
@@ -71,6 +72,7 @@ func (f *flags) New() error {
    f.s.PrivateKey = f.home + "/widevine/private_key.pem"
    return nil
 }
+
 func (f *flags) download() error {
    data, err := os.ReadFile(f.address.String() + ".txt")
    if err != nil {
