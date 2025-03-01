@@ -19,6 +19,28 @@ import (
    "strings"
 )
 
+func get(u *url.URL, head http.Header) ([]byte, error) {
+   req := http.Request{Method: "GET", URL: u}
+   if head != nil {
+      req.Header = head
+   } else {
+      req.Header = http.Header{}
+   }
+   resp, err := http.DefaultClient.Do(&req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   switch resp.StatusCode {
+   case http.StatusOK, http.StatusPartialContent:
+   default:
+      var data strings.Builder
+      resp.Write(&data)
+      return nil, errors.New(data.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
 func (e *License) Download(name, id string) error {
    data, err := os.ReadFile(name)
    if err != nil {
@@ -439,28 +461,6 @@ var Forward = []struct {
    {"Taiwan", "120.96.0.0"},
    {"United Kingdom", "25.0.0.0"},
    {"Venezuela", "190.72.0.0"},
-}
-
-func get(u *url.URL, head http.Header) ([]byte, error) {
-   req := http.Request{URL: u}
-   if head != nil {
-      req.Header = head
-   } else {
-      req.Header = http.Header{}
-   }
-   resp, err := http.DefaultClient.Do(&req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   switch resp.StatusCode {
-   case http.StatusOK, http.StatusPartialContent:
-   default:
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
 }
 
 func write_segment(data, key []byte) ([]byte, error) {

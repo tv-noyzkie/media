@@ -12,13 +12,13 @@ import (
 
 func (f *flags) New() error {
    var err error
-   f.home, err = os.UserHomeDir()
+   f.media, err = os.UserHomeDir()
    if err != nil {
       return err
    }
-   f.home = filepath.ToSlash(f.home) + "/media"
-   f.e.ClientId = f.home + "/client_id.bin"
-   f.e.PrivateKey = f.home + "/private_key.pem"
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
    return nil
 }
 
@@ -48,7 +48,7 @@ func main() {
 type flags struct {
    content_id     string
    e              internal.License
-   home           string
+   media           string
    mullvad        bool
    representation string
 }
@@ -66,7 +66,7 @@ func (f *flags) download() error {
          return err
       }
       f.e.Widevine = session.Widevine()
-      return f.e.Download(f.home + "/.mpd", f.representation)
+      return f.e.Download(f.media + "/Mpd", f.representation)
    }
    var secret paramount.AppSecret
    if f.mullvad {
@@ -88,5 +88,5 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   return internal.Mpd(f.home + "/.mpd", resp)
+   return internal.Mpd(f.media + "/Mpd", resp)
 }

@@ -5,6 +5,7 @@ import (
    "41.neocities.org/media/roku"
    "flag"
    "fmt"
+   "log"
    "net/http"
    "os"
    "path/filepath"
@@ -67,6 +68,11 @@ func main() {
    }
 }
 
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
+}
+
 func (f *flags) write_code() error {
    data, err := (*roku.Code).AccountToken(nil)
    if err != nil {
@@ -77,7 +83,7 @@ func (f *flags) write_code() error {
    if err != nil {
       return err
    }
-   err = os.WriteFile(f.media + "/roku/AccountToken", data, os.ModePerm)
+   err = f.write_file("/roku/AccountToken", data)
    if err != nil {
       return err
    }
@@ -91,7 +97,7 @@ func (f *flags) write_code() error {
       return err
    }
    fmt.Println(activation)
-   return os.WriteFile(f.media + "/roku/Activation", data1, os.ModePerm)
+   return f.write_file("/roku/Activation", data1)
 }
 
 func (f *flags) write_token() error {
@@ -117,7 +123,7 @@ func (f *flags) write_token() error {
    if err != nil {
       return err
    }
-   return os.WriteFile(f.media + "/roku/Code", data, os.ModePerm)
+   return f.write_file("/roku/Code", data)
 }
 
 func (f *flags) download() error {
@@ -132,7 +138,7 @@ func (f *flags) download() error {
          return err
       }
       f.e.Widevine = play.Widevine()
-      return f.e.Download(f.media + "/.mpd", f.representation)
+      return f.e.Download(f.media + "/Mpd", f.representation)
    }
    var code *roku.Code
    if f.token_read {
@@ -159,7 +165,7 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   err = os.WriteFile(f.media + "/roku/Playback", data1, os.ModePerm)
+   err = f.write_file("/roku/Playback", data1)
    if err != nil {
       return err
    }
@@ -172,5 +178,5 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   return internal.Mpd(f.media + "/.mpd", resp)
+   return internal.Mpd(f.media + "/Mpd", resp)
 }
