@@ -11,6 +11,45 @@ import (
    "path/filepath"
 )
 
+func (f *flags) New() error {
+   var err error
+   f.media, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
+   return nil
+}
+
+type flags struct {
+   address        mubi.Address
+   e              internal.License
+   media          string
+   representation string
+   auth           bool
+   code           bool
+}
+
+func timed_text(url string) error {
+   resp, err := http.Get(url)
+   if err != nil {
+      return err
+   }
+   defer resp.Body.Close()
+   file, err := os.Create(".vtt")
+   if err != nil {
+      return err
+   }
+   defer file.Close()
+   _, err = file.ReadFrom(resp.Body)
+   if err != nil {
+      return err
+   }
+   return nil
+}
+
 func main() {
    var f flags
    err := f.New()
@@ -21,27 +60,21 @@ func main() {
    flag.BoolVar(&f.auth, "auth", false, "authenticate")
    flag.BoolVar(&f.code, "code", false, "link code")
    flag.StringVar(&f.representation, "i", "", "representation")
-   flag.BoolVar(&f.secure, "w", false, "secure URL")
-   flag.StringVar(&f.s.ClientId, "c", f.s.ClientId, "client ID")
-   flag.StringVar(&f.s.PrivateKey, "p", f.s.PrivateKey, "private key")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.e.PrivateKey, "p", f.e.PrivateKey, "private key")
    flag.Parse()
    switch {
+   case f.code:
+      err := f.write_code()
+      if err != nil {
+         panic(err)
+      }
    case f.auth:
       err := f.write_auth()
       if err != nil {
          panic(err)
       }
-   case f.code:
-      err := write_code()
-      if err != nil {
-         panic(err)
-      }
-   case f.secure:
-      err := f.write_secure()
-      if err != nil {
-         panic(err)
-      }
-   case f.address.String() != "":
+   case f.address[0] != "":
       err := f.download()
       if err != nil {
          panic(err)
@@ -51,27 +84,26 @@ func main() {
    }
 }
 
-type flags struct {
-   address        mubi.Address
-   auth           bool
-   code           bool
-   home           string
-   representation string
-   s              internal.Stream
-   secure         bool
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
 }
 
-func (f *flags) New() error {
-   var err error
-   f.home, err = os.UserHomeDir()
+func (f *flags) write_code() error {
+   data, err := mubi.NewLinkCode()
    if err != nil {
       return err
    }
-   f.home = filepath.ToSlash(f.home)
-   f.s.ClientId = f.home + "/widevine/client_id.bin"
-   f.s.PrivateKey = f.home + "/widevine/private_key.pem"
-   return nil
+   var code mubi.LinkCode
+   err = code.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   fmt.Println(&code)
+   return f.write_file("/mubi/LinkCode", data)
 }
+
+///
 
 func (f *flags) download() error {
    data, err := os.ReadFile(f.address.String() + ".txt")
@@ -88,7 +120,7 @@ func (f *flags) download() error {
       case "":
          fmt.Print(&text, "\n\n")
       case text.Id:
-         return f.timed_text(text.Url)
+         return timed_text(text.Url)
       }
    }
    // github.com/golang/go/issues/18639
@@ -104,7 +136,7 @@ func (f *flags) download() error {
       case "":
          fmt.Print(&represent, "\n\n")
       case represent.Id:
-         data, err = os.ReadFile(f.home + "/mubi.txt")
+         data, err = os.ReadFile(f.media + "/mubi.txt")
          if err != nil {
             return err
          }
@@ -113,15 +145,15 @@ func (f *flags) download() error {
          if err != nil {
             return err
          }
-         f.s.Client = &auth
-         return f.s.Download(&represent)
+         f.e.Client = &auth
+         return f.e.Download(&represent)
       }
    }
    return nil
 }
 
 func (f *flags) write_secure() error {
-   data, err := os.ReadFile(f.home + "/mubi.txt")
+   data, err := os.ReadFile(f.media + "/mubi.txt")
    if err != nil {
       return err
    }
@@ -159,41 +191,5 @@ func (f *flags) write_auth() error {
    if err != nil {
       return err
    }
-   return os.WriteFile(f.home+"/mubi.txt", data, os.ModePerm)
-}
-
-func write_code() error {
-   var code mubi.LinkCode
-   data, err := code.Marshal()
-   if err != nil {
-      return err
-   }
-   err = os.WriteFile("code.txt", data, os.ModePerm)
-   if err != nil {
-      return err
-   }
-   err = code.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   fmt.Println(&code)
-   return nil
-}
-
-func (f *flags) timed_text(url string) error {
-   resp, err := http.Get(url)
-   if err != nil {
-      return err
-   }
-   defer resp.Body.Close()
-   file, err := os.Create(".vtt")
-   if err != nil {
-      return err
-   }
-   defer file.Close()
-   _, err = file.ReadFrom(resp.Body)
-   if err != nil {
-      return err
-   }
-   return nil
+   return os.WriteFile(f.media+"/mubi.txt", data, os.ModePerm)
 }

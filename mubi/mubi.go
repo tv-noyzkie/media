@@ -11,6 +11,48 @@ import (
    "strings"
 )
 
+func NewLinkCode() (Byte[LinkCode], error) {
+   req, _ := http.NewRequest("", "https://api.mubi.com/v3/link_code", nil)
+   req.Header = http.Header{
+      "client":         {client},
+      "client-country": {ClientCountry},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
+   return json.Unmarshal(data, c)
+}
+
+// geo block
+func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
+   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/v3/films/")
+      b = strconv.AppendInt(b, film1.Id, 10)
+      b = append(b, "/viewing/secure_url"...)
+      return string(b)
+   }()
+   req.Header = http.Header{
+      "authorization":  {"Bearer " + a.Token},
+      "client":         {client},
+      "client-country": {ClientCountry},
+   }
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+type Address [1]string
+
 func (a *Authenticate) Widevine(data []byte) ([]byte, error) {
    // final slash is needed
    req, err := http.NewRequest(
@@ -50,6 +92,7 @@ func (a *Authenticate) Widevine(data []byte) ([]byte, error) {
    }
    return value.License, nil
 }
+
 func (s status) Error() string {
    return strings.ToLower(s[0])
 }
@@ -97,8 +140,6 @@ func (a *Address) Set(data string) error {
    }
    return nil
 }
-
-type Address [1]string
 
 func (a Address) Film() (*Film, error) {
    req, _ := http.NewRequest("", "https://api.mubi.com", nil)
@@ -168,24 +209,6 @@ func (c *LinkCode) String() string {
 
 type Byte[T any] []byte
 
-func NewLinkCode() (Byte[LinkCode], error) {
-   req, _ := http.NewRequest("", "https://api.mubi.com/v3/link_code", nil)
-   req.Header = http.Header{
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
-   return json.Unmarshal(data, c)
-}
-
 type LinkCode struct {
    AuthToken string `json:"auth_token"`
    LinkCode  string `json:"link_code"`
@@ -224,27 +247,6 @@ type Authenticate struct {
    User  struct {
       Id int
    }
-}
-
-func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
-   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/v3/films/")
-      b = strconv.AppendInt(b, film1.Id, 10)
-      b = append(b, "/viewing/secure_url"...)
-      return string(b)
-   }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + a.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 func (s *SecureUrl) Unmarshal(data Byte[SecureUrl]) error {
