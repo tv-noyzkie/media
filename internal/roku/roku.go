@@ -11,6 +11,63 @@ import (
    "path/filepath"
 )
 
+func (f *flags) download() error {
+   if f.representation != "" {
+      data, err := os.ReadFile(f.media + "/roku/Playback")
+      if err != nil {
+         return err
+      }
+      var play roku.Playback
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return play.Widevine(data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.representation)
+   }
+   var code *roku.Code
+   if f.token_read {
+      data, err := os.ReadFile(f.media + "/roku/Code")
+      if err != nil {
+         return err
+      }
+      code = &roku.Code{}
+      err = code.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+   }
+   data, err := code.AccountToken()
+   if err != nil {
+      return err
+   }
+   var token roku.AccountToken
+   err = token.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   data1, err := token.Playback(f.roku)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/roku/Playback", data1)
+   if err != nil {
+      return err
+   }
+   var play roku.Playback
+   err = play.Unmarshal(data1)
+   if err != nil {
+      return err
+   }
+   resp, err := http.Get(play.Url)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media + "/Mpd", resp)
+}
+
 type flags struct {
    code_write     bool
    e              internal.License
@@ -124,59 +181,4 @@ func (f *flags) write_token() error {
       return err
    }
    return f.write_file("/roku/Code", data)
-}
-
-func (f *flags) download() error {
-   if f.representation != "" {
-      data, err := os.ReadFile(f.media + "/roku/Playback")
-      if err != nil {
-         return err
-      }
-      var play roku.Playback
-      err = play.Unmarshal(data)
-      if err != nil {
-         return err
-      }
-      f.e.Widevine = play.Widevine()
-      return f.e.Download(f.media + "/Mpd", f.representation)
-   }
-   var code *roku.Code
-   if f.token_read {
-      data, err := os.ReadFile(f.media + "/roku/Code")
-      if err != nil {
-         return err
-      }
-      code = &roku.Code{}
-      err = code.Unmarshal(data)
-      if err != nil {
-         return err
-      }
-   }
-   data, err := code.AccountToken()
-   if err != nil {
-      return err
-   }
-   var token roku.AccountToken
-   err = token.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   data1, err := token.Playback(f.roku)
-   if err != nil {
-      return err
-   }
-   err = f.write_file("/roku/Playback", data1)
-   if err != nil {
-      return err
-   }
-   var play roku.Playback
-   err = play.Unmarshal(data1)
-   if err != nil {
-      return err
-   }
-   resp, err := http.Get(play.Url)
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(f.media + "/Mpd", resp)
 }

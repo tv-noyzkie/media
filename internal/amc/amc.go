@@ -23,7 +23,9 @@ func (f *flags) download() error {
          return err
       }
       source, _ := play.Dash()
-      f.e.Widevine = play.Widevine(source)
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return play.Widevine(source, data)
+      }
       return f.e.Download(f.media + "/Mpd", f.representation)
    }
    data, err := os.ReadFile(f.media + "/amc/Auth")

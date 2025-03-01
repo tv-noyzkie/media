@@ -8,6 +8,18 @@ import (
    "strings"
 )
 
+func (p *Playback) Widevine(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      p.Drm.Widevine.LicenseServer, "application/x-protobuf",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (p *Playback) Unmarshal(data Byte[Playback]) error {
    return json.Unmarshal(data, p)
 }
@@ -143,18 +155,4 @@ type Playback struct {
       }
    }
    Url string // MPD
-}
-
-func (p *Playback) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      resp, err := http.Post(
-         p.Drm.Widevine.LicenseServer, "application/x-protobuf",
-         bytes.NewReader(data),
-      )
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
 }
