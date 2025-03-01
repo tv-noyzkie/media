@@ -23,13 +23,6 @@ func (t *TextTrack) String() string {
 
 type status [1]string
 
-type Authenticate struct {
-   Token string
-   User  struct {
-      Id int
-   }
-}
-
 type SecureUrl struct {
    TextTrackUrls []TextTrack `json:"text_track_urls"`
    Url           string // MPD
@@ -38,11 +31,6 @@ type SecureUrl struct {
 type TextTrack struct {
    Id  string
    Url string
-}
-
-type LinkCode struct {
-   AuthToken string `json:"auth_token"`
-   LinkCode  string `json:"link_code"`
 }
 
 type Film struct {
@@ -139,39 +127,9 @@ func (c *LinkCode) String() string {
    return b.String()
 }
 
-///
+type Byte[T any] []byte
 
-func (SecureUrl) Marshal(auth *Authenticate, film1 *Film) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/v3/films/")
-      b = strconv.AppendInt(b, film1.Id, 10)
-      b = append(b, "/viewing/secure_url"...)
-      return string(b)
-   }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + auth.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-func (a *Authenticate) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, a)
-}
-
-func (LinkCode) Marshal() ([]byte, error) {
+func NewLinkCode() (Byte[LinkCode], error) {
    req, _ := http.NewRequest("", "https://api.mubi.com/v3/link_code", nil)
    req.Header = http.Header{
       "client":         {client},
@@ -182,16 +140,20 @@ func (LinkCode) Marshal() ([]byte, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
    return io.ReadAll(resp.Body)
 }
 
-func (Authenticate) Marshal(code *LinkCode) ([]byte, error) {
-   data, err := json.Marshal(map[string]string{"auth_token": code.AuthToken})
+func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
+   return json.Unmarshal(data, c)
+}
+
+type LinkCode struct {
+   AuthToken string `json:"auth_token"`
+   LinkCode  string `json:"link_code"`
+}
+
+func (c *LinkCode) Authenticate() (Byte[Authenticate], error) {
+   data, err := json.Marshal(map[string]string{"auth_token": c.AuthToken})
    if err != nil {
       return nil, err
    }
@@ -211,58 +173,83 @@ func (Authenticate) Marshal(code *LinkCode) ([]byte, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data bytes.Buffer
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
    return io.ReadAll(resp.Body)
 }
 
-func (c *LinkCode) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, c)
+func (a *Authenticate) Unmarshal(data Byte[Authenticate]) error {
+   return json.Unmarshal(data, a)
 }
 
-func (s *SecureUrl) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, s)
+type Authenticate struct {
+   Token string
+   User  struct {
+      Id int
+   }
 }
 
-func (a *Authenticate) License(data []byte) ([]byte, error) {
-   // final slash is needed
-   req, err := http.NewRequest(
-      "POST", "https://lic.drmtoday.com/license-proxy-widevine/cenc/",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
+func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
+   req, _ := http.NewRequest("", "https://api.mubi.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/v3/films/")
+      b = strconv.AppendInt(b, film1.Id, 10)
+      b = append(b, "/viewing/secure_url"...)
+      return string(b)
+   }()
+   req.Header = http.Header{
+      "authorization":  {"Bearer " + a.Token},
+      "client":         {client},
+      "client-country": {ClientCountry},
    }
-   data, err = json.Marshal(map[string]any{
-      "merchant":  "mubi",
-      "sessionId": a.Token,
-      "userId":    a.User.Id,
-   })
-   if err != nil {
-      return nil, err
-   }
-   req.Header.Set("dt-custom-data", base64.StdEncoding.EncodeToString(data))
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
    }
    defer resp.Body.Close()
-   data, err = io.ReadAll(resp.Body)
-   if err != nil {
-      return nil, err
+   return io.ReadAll(resp.Body)
+}
+
+func (s *SecureUrl) Unmarshal(data Byte[SecureUrl]) error {
+   return json.Unmarshal(data, s)
+}
+
+func (a *Authenticate) Widevine() func([]byte) ([]byte, error) {
+   return func(data []byte) ([]byte, error) {
+      // final slash is needed
+      req, err := http.NewRequest(
+         "POST", "https://lic.drmtoday.com/license-proxy-widevine/cenc/",
+         bytes.NewReader(data),
+      )
+      if err != nil {
+         return nil, err
+      }
+      data, err = json.Marshal(map[string]any{
+         "merchant":  "mubi",
+         "sessionId": a.Token,
+         "userId":    a.User.Id,
+      })
+      if err != nil {
+         return nil, err
+      }
+      req.Header.Set("dt-custom-data", base64.StdEncoding.EncodeToString(data))
+      resp, err := http.DefaultClient.Do(req)
+      if err != nil {
+         return nil, err
+      }
+      defer resp.Body.Close()
+      data, err = io.ReadAll(resp.Body)
+      if err != nil {
+         return nil, err
+      }
+      if strings.Contains(string(data), forbidden[0]) {
+         return nil, forbidden
+      }
+      var value struct {
+         License []byte
+      }
+      err = json.Unmarshal(data, &value)
+      if err != nil {
+         return nil, err
+      }
+      return value.License, nil
    }
-   if strings.Contains(string(data), forbidden[0]) {
-      return nil, forbidden
-   }
-   var value struct {
-      License []byte
-   }
-   err = json.Unmarshal(data, &value)
-   if err != nil {
-      return nil, err
-   }
-   return value.License, nil
 }
