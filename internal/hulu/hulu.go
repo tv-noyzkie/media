@@ -10,6 +10,55 @@ import (
    "path/filepath"
 )
 
+func (f *flags) download() error {
+   if f.representation != "" {
+      data, err := os.ReadFile(f.media + "/hulu/Playlist")
+      if err != nil {
+         return err
+      }
+      var play hulu.Playlist
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return play.Widevine(data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.representation)
+   }
+   data, err := os.ReadFile(f.media + "/hulu/Authenticate")
+   if err != nil {
+      return err
+   }
+   var auth hulu.Authenticate
+   err = auth.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   deep, err := auth.DeepLink(f.entity)
+   if err != nil {
+      return err
+   }
+   data1, err := auth.Playlist(deep)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/hulu/Playlist", data1)
+   if err != nil {
+      return err
+   }
+   var play hulu.Playlist
+   err = play.Unmarshal(data1)
+   if err != nil {
+      return err
+   }
+   resp, err := http.Get(play.StreamUrl)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media + "/Mpd", resp)
+}
+
 type flags struct {
    e              internal.License
    email          string
@@ -71,51 +120,4 @@ func (f *flags) authenticate() error {
 func (f *flags) write_file(name string, data []byte) error {
    log.Println("WriteFile", f.media + name)
    return os.WriteFile(f.media + name, data, os.ModePerm)
-}
-
-func (f *flags) download() error {
-   if f.representation != "" {
-      data, err := os.ReadFile(f.media + "/hulu/Playlist")
-      if err != nil {
-         return err
-      }
-      var play hulu.Playlist
-      err = play.Unmarshal(data)
-      if err != nil {
-         return err
-      }
-      f.e.Widevine = play.Widevine()
-      return f.e.Download(f.media + "/Mpd", f.representation)
-   }
-   data, err := os.ReadFile(f.media + "/hulu/Authenticate")
-   if err != nil {
-      return err
-   }
-   var auth hulu.Authenticate
-   err = auth.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   deep, err := auth.DeepLink(f.entity)
-   if err != nil {
-      return err
-   }
-   data1, err := auth.Playlist(deep)
-   if err != nil {
-      return err
-   }
-   err = f.write_file("/hulu/Playlist", data1)
-   if err != nil {
-      return err
-   }
-   var play hulu.Playlist
-   err = play.Unmarshal(data1)
-   if err != nil {
-      return err
-   }
-   resp, err := http.Get(play.StreamUrl)
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(f.media + "/Mpd", resp)
 }

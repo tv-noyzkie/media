@@ -11,6 +11,17 @@ import (
    "strings"
 )
 
+func (p *Playlist) Widevine(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      p.WvServer, "application/x-protobuf", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (p *Playlist) Unmarshal(data Byte[Playlist]) error {
    return json.Unmarshal(data, p)
 }
@@ -173,18 +184,6 @@ func (a Authenticate) DeepLink(id Entity) (*DeepLink, error) {
       return nil, errors.New("eab_id")
    }
    return &deep, nil
-}
-func (p *Playlist) Widevine() func([]byte) ([]byte, error) {
-   return func(data []byte) ([]byte, error) {
-      resp, err := http.Post(
-         p.WvServer, "application/x-protobuf", bytes.NewReader(data),
-      )
-      if err != nil {
-         return nil, err
-      }
-      defer resp.Body.Close()
-      return io.ReadAll(resp.Body)
-   }
 }
 
 type Playlist struct {
