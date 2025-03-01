@@ -11,10 +11,6 @@ import (
    "strings"
 )
 
-func (a *Authenticate) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, a)
-}
-
 func (e EntityId) String() string {
    return e[0]
 }
@@ -23,6 +19,14 @@ func (e EntityId) String() string {
 func (e *EntityId) Set(data string) error {
    (*e)[0] = path.Base(data)
    return nil
+}
+
+type EntityId [1]string
+
+type Authenticate struct {
+   Data struct {
+      UserToken string `json:"user_token"`
+   }
 }
 
 func (a Authenticate) DeepLink(id *EntityId) (*DeepLink, error) {
@@ -47,35 +51,6 @@ func (a Authenticate) DeepLink(id *EntityId) (*DeepLink, error) {
       return nil, errors.New("eab_id")
    }
    return &link, nil
-}
-
-type EntityId [1]string
-
-func (Authenticate) Marshal(email, password string) ([]byte, error) {
-   resp, err := http.PostForm(
-      "https://auth.hulu.com/v2/livingroom/password/authenticate", url.Values{
-         "friendly_name": {"!"},
-         "password":      {password},
-         "serial_number": {"!"},
-         "user_email":    {email},
-      },
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var b strings.Builder
-      resp.Write(&b)
-      return nil, errors.New(b.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-type Authenticate struct {
-   Data struct {
-      UserToken string `json:"user_token"`
-   }
 }
 
 type DeepLink struct {
@@ -179,6 +154,38 @@ func (a Authenticate) Playlist(link *DeepLink) (*Playlist, error) {
    return play, nil
 }
 
+type Playlist struct {
+   StreamUrl string `json:"stream_url"` // MPD
+   WvServer  string `json:"wv_server"`
+}
+
+///
+
+func (Authenticate) Marshal(email, password string) ([]byte, error) {
+   resp, err := http.PostForm(
+      "https://auth.hulu.com/v2/livingroom/password/authenticate", url.Values{
+         "friendly_name": {"!"},
+         "password":      {password},
+         "serial_number": {"!"},
+         "user_email":    {email},
+      },
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   if resp.StatusCode != http.StatusOK {
+      var b strings.Builder
+      resp.Write(&b)
+      return nil, errors.New(b.String())
+   }
+   return io.ReadAll(resp.Body)
+}
+
+func (a *Authenticate) Unmarshal(data []byte) error {
+   return json.Unmarshal(data, a)
+}
+
 func (p *Playlist) License(data []byte) ([]byte, error) {
    resp, err := http.Post(
       p.WvServer, "application/x-protobuf", bytes.NewReader(data),
@@ -188,13 +195,4 @@ func (p *Playlist) License(data []byte) ([]byte, error) {
    }
    defer resp.Body.Close()
    return io.ReadAll(resp.Body)
-}
-
-type Playlist struct {
-   StreamUrl string `json:"stream_url"`
-   WvServer  string `json:"wv_server"`
-}
-
-func (p *Playlist) Mpd() (*http.Response, error) {
-   return http.Get(p.StreamUrl)
 }

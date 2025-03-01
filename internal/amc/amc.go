@@ -12,6 +12,20 @@ import (
 )
 
 func (f *flags) download() error {
+   if f.representation != "" {
+      data, err := os.ReadFile(f.media + "/amc/Playback")
+      if err != nil {
+         return err
+      }
+      var play amc.Playback
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      source, _ := play.Dash()
+      f.e.Widevine = play.Widevine(source)
+      return f.e.Download(f.media + "/Mpd", f.representation)
+   }
    data, err := os.ReadFile(f.media + "/amc/Auth")
    if err != nil {
       return err
@@ -25,7 +39,7 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   err = f.write_file("/amc.txt", data)
+   err = f.write_file("/amc/Auth", data)
    if err != nil {
       return err
    }
@@ -33,17 +47,22 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   play, err := auth.Playback(f.address)
+   data1, err := auth.Playback(f.address)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/amc/Playback", data1)
+   if err != nil {
+      return err
+   }
+   var play amc.Playback
+   err = play.Unmarshal(data1)
    if err != nil {
       return err
    }
    source, ok := play.Dash()
    if !ok {
       return errors.New(".Dash()")
-   }
-   if f.representation != "" {
-      f.e.Widevine = play.Widevine(source)
-      return f.e.Download(f.media + "/Mpd", f.representation)
    }
    resp, err := http.Get(source.Src)
    if err != nil {
