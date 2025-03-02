@@ -44,6 +44,7 @@ func main() {
    flag.Parse()
    if f.mullvad {
       http.DefaultClient.Transport = &mullvad.Transport{}
+      defer mullvad.Disconnect()
    }
    switch {
    case f.address[0] != "":

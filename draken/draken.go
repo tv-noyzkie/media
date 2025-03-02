@@ -47,14 +47,6 @@ type header struct {
    value string
 }
 
-type Login struct {
-   Token string
-}
-
-type Entitlement struct {
-   Token string
-}
-
 const get_custom_id = `
 query GetCustomIdFullMovie($customId: ID!) {
    viewer {
@@ -69,66 +61,8 @@ query GetCustomIdFullMovie($customId: ID!) {
 }
 ` // do not do `query(`
 
-func (Login) Marshal(identity, key string) ([]byte, error) {
-   data, err := json.Marshal(map[string]string{
-      "accessKey": key,
-      "identity":  identity,
-   })
-   if err != nil {
-      return nil, err
-   }
-   resp, err := http.Post(
-      "https://drakenfilm.se/api/auth/login", "application/json",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-type Client struct {
-   Login    *Login
-   Playback *Playback
-}
-
-func (n *Login) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, n)
-}
-
 func graphql_compact(data string) string {
    return strings.Join(strings.Fields(data), " ")
-}
-
-type Playback struct {
-   Headers  map[string]string
-   Playlist string
-}
-
-func (p *Playback) Mpd() (*http.Response, error) {
-   return http.Get(p.Playlist)
-}
-
-func (c *Client) License(data []byte) ([]byte, error) {
-   req, err := http.NewRequest(
-      "POST", "https://client-api.magine.com/api/playback/v1/widevine/license",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   magine_accesstoken.set(req.Header)
-   for key, value := range c.Playback.Headers {
-      req.Header.Set(key, value)
-   }
-   req.Header.Set("authorization", "Bearer "+c.Login.Token)
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 func (d *DefaultPlayable) New(custom_id string) error {
@@ -175,7 +109,45 @@ func (d *DefaultPlayable) New(custom_id string) error {
    return errors.New("ViewableCustomId")
 }
 
-func (n *Login) Entitlement(play DefaultPlayable) (*Entitlement, error) {
+type DefaultPlayable struct {
+   Id string
+}
+
+type Byte[T any] []byte
+
+func NewLogin(identity, key string) (Byte[Login], error) {
+   data, err := json.Marshal(map[string]string{
+      "accessKey": key,
+      "identity":  identity,
+   })
+   if err != nil {
+      return nil, err
+   }
+   resp, err := http.Post(
+      "https://drakenfilm.se/api/auth/login", "application/json",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (n *Login) Unmarshal(data Byte[Login]) error {
+   return json.Unmarshal(data, n)
+}
+
+type Entitlement struct {
+   Token string
+}
+
+type Playback struct {
+   Headers  map[string]string
+   Playlist string // MPD
+}
+
+func (n Login) Entitlement(play DefaultPlayable) (*Entitlement, error) {
    req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
    req.URL.Path = "/api/entitlement/v2/asset/" + play.Id
    req.Header.Set("authorization", "Bearer "+n.Token)
@@ -193,12 +165,12 @@ func (n *Login) Entitlement(play DefaultPlayable) (*Entitlement, error) {
    return title, nil
 }
 
-type DefaultPlayable struct {
-   Id string
+type Login struct {
+   Token string
 }
 
-func (n *Login) Playback(
-   play DefaultPlayable, title *Entitlement,
+func (n Login) Playback(
+   play *DefaultPlayable, title *Entitlement,
 ) (*Playback, error) {
    req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
    req.URL.Path = "/api/playback/v1/preflight/asset/" + play.Id
@@ -223,4 +195,25 @@ func (n *Login) Playback(
       return nil, err
    }
    return play1, nil
+}
+
+func (n Login) Widevine(play *Playback, data []byte) ([]byte, error) {
+   req, err := http.NewRequest(
+      "POST", "https://client-api.magine.com/api/playback/v1/widevine/license",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   magine_accesstoken.set(req.Header)
+   for key, value := range play.Headers {
+      req.Header.Set(key, value)
+   }
+   req.Header.Set("authorization", "Bearer " + n.Token)
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
 }
