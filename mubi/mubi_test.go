@@ -7,16 +7,16 @@ import (
    "time"
 )
 
-var tests = []struct{
-   id     int64
-   key_id string
-   url  string
+var tests = []struct {
+   id        int64
+   key_id    string
+   url       string
    locations []string
 }{
    {
       id:     325455,
       key_id: "CA215A25BB2D43F0BD095FC671C984EE",
-      url: "mubi.com/films/passages-2022",
+      url:    "mubi.com/films/passages-2022",
       locations: []string{
          "Austria",
          "Belgium",

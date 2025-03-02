@@ -100,8 +100,7 @@ func Mpd(name string, resp *http.Response) error {
    if err != nil {
       return err
    }
-   log.Println("Create", name)
-   file, err := os.Create(name)
+   file, err := create(name)
    if err != nil {
       return err
    }
@@ -128,8 +127,8 @@ func Mpd(name string, resp *http.Response) error {
    return nil
 }
 
-func (e *License) get_key(head *header) ([]byte, error) {
-   if head.key_id == nil {
+func (e *License) get_key(message *pssh_data) ([]byte, error) {
+   if message.key_id == nil {
       return nil, nil
    }
    private_key, err := os.ReadFile(e.PrivateKey)
@@ -140,14 +139,14 @@ func (e *License) get_key(head *header) ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   if head.pssh == nil {
+   if message.pssh == nil {
       var pssh1 widevine.Pssh
-      pssh1.KeyIds = [][]byte{head.key_id}
-      head.pssh = pssh1.Marshal()
+      pssh1.KeyIds = [][]byte{message.key_id}
+      message.pssh = pssh1.Marshal()
    }
-   log.Println("PSSH", base64.StdEncoding.EncodeToString(head.pssh))
+   log.Println("PSSH", base64.StdEncoding.EncodeToString(message.pssh))
    var module widevine.Cdm
-   err = module.New(private_key, client_id, head.pssh)
+   err = module.New(private_key, client_id, message.pssh)
    if err != nil {
       return nil, err
    }
@@ -174,7 +173,7 @@ func (e *License) get_key(head *header) ([]byte, error) {
       if !ok {
          return nil, errors.New("ResponseBody.Container")
       }
-      if bytes.Equal(container.Id(), head.key_id) {
+      if bytes.Equal(container.Id(), message.key_id) {
          key := container.Key(block)
          log.Println("key", base64.StdEncoding.EncodeToString(key))
          return key, nil
@@ -183,8 +182,8 @@ func (e *License) get_key(head *header) ([]byte, error) {
 }
 
 func (e *License) segment_template(represent *dash.Representation) error {
-   var head header
-   err := head.New(represent)
+   var message pssh_data
+   err := message.New(represent)
    if err != nil {
       return err
    }
@@ -202,7 +201,7 @@ func (e *License) segment_template(represent *dash.Representation) error {
       if err != nil {
          return err
       }
-      data, err = head.initialization(data)
+      data, err = message.initialization(data)
       if err != nil {
          return err
       }
@@ -211,23 +210,24 @@ func (e *License) segment_template(represent *dash.Representation) error {
          return err
       }
    }
-   key, err := e.get_key(&head)
+   key, err := e.get_key(&message)
    if err != nil {
       return err
    }
-   http.DefaultClient.Transport = nil
    var segments []int
    for represent1 := range represent.Representation() {
       segments = slices.AppendSeq(segments, represent1.Segment())
    }
    var progress xhttp.ProgressParts
    progress.Set(len(segments))
+   head := http.Header{}
+   head.Set("silent", "true")
    for _, segment := range segments {
       media, err := represent.SegmentTemplate.Media.Url(represent, segment)
       if err != nil {
          return err
       }
-      data, err := get(media, nil)
+      data, err := get(media, head)
       if err != nil {
          return err
       }
@@ -245,8 +245,8 @@ func (e *License) segment_template(represent *dash.Representation) error {
 }
 
 func (e *License) segment_base(represent *dash.Representation) error {
-   var head header
-   err := head.New(represent)
+   var message pssh_data
+   err := message.New(represent)
    if err != nil {
       return err
    }
@@ -262,7 +262,7 @@ func (e *License) segment_base(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   data, err = head.initialization(data)
+   data, err = message.initialization(data)
    if err != nil {
       return err
    }
@@ -270,7 +270,7 @@ func (e *License) segment_base(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   key, err := e.get_key(&head)
+   key, err := e.get_key(&message)
    if err != nil {
       return err
    }
@@ -285,15 +285,15 @@ func (e *License) segment_base(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   http.DefaultClient.Transport = nil
    var progress xhttp.ProgressParts
    progress.Set(len(file_file.Sidx.Reference))
+   head := http.Header{}
+   head.Set("silent", "true")
    for _, reference := range file_file.Sidx.Reference {
       base.IndexRange[0] = base.IndexRange[1] + 1
       base.IndexRange[1] += uint64(reference.Size())
-      data, err = get(represent.BaseUrl[0], http.Header{
-         "range": {"bytes=" + base.IndexRange.String()},
-      })
+      head.Set("range", "bytes=" + base.IndexRange.String())
+      data, err = get(represent.BaseUrl[0], head)
       if err != nil {
          return err
       }
@@ -311,8 +311,8 @@ func (e *License) segment_base(represent *dash.Representation) error {
 }
 
 func (e *License) segment_list(represent *dash.Representation) error {
-   var head header
-   err := head.New(represent)
+   var message pssh_data
+   err := message.New(represent)
    if err != nil {
       return err
    }
@@ -329,7 +329,7 @@ func (e *License) segment_list(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   data, err = head.initialization(data)
+   data, err = message.initialization(data)
    if err != nil {
       return err
    }
@@ -337,19 +337,20 @@ func (e *License) segment_list(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   key, err := e.get_key(&head)
+   key, err := e.get_key(&message)
    if err != nil {
       return err
    }
-   http.DefaultClient.Transport = nil
    var progress xhttp.ProgressParts
    progress.Set(len(represent.SegmentList.SegmentUrl))
+   head := http.Header{}
+   head.Set("silent", "true")
    for _, segment := range represent.SegmentList.SegmentUrl {
       media, err := segment.Media.Url(represent)
       if err != nil {
          return err
       }
-      data, err := get(media, nil)
+      data, err := get(media, head)
       if err != nil {
          return err
       }
@@ -366,12 +367,12 @@ func (e *License) segment_list(represent *dash.Representation) error {
    return nil
 }
 
-type header struct {
+type pssh_data struct {
    key_id []byte
    pssh   []byte
 }
 
-func (h *header) New(represent *dash.Representation) error {
+func (p *pssh_data) New(represent *dash.Representation) error {
    for _, content := range represent.ContentProtection {
       if content.SchemeIdUri == widevine_urn {
          if content.Pssh != "" {
@@ -388,7 +389,7 @@ func (h *header) New(represent *dash.Representation) error {
             if err != nil {
                return err
             }
-            h.pssh = box.Data
+            p.pssh = box.Data
             break
          }
       }
@@ -396,8 +397,7 @@ func (h *header) New(represent *dash.Representation) error {
    return nil
 }
 
-// RECEIVER CANNOT BE NIL
-func (h *header) initialization(data []byte) ([]byte, error) {
+func (p *pssh_data) initialization(data []byte) ([]byte, error) {
    var file_file file.File
    err := file_file.Read(data)
    if err != nil {
@@ -406,13 +406,13 @@ func (h *header) initialization(data []byte) ([]byte, error) {
    if moov, ok := file_file.GetMoov(); ok {
       for _, pssh1 := range moov.Pssh {
          if pssh1.SystemId.String() == widevine_system_id {
-            h.pssh = pssh1.Data
+            p.pssh = pssh1.Data
          }
          copy(pssh1.BoxHeader.Type[:], "free") // Firefox
       }
       description := moov.Trak.Mdia.Minf.Stbl.Stsd
       if sinf, ok := description.Sinf(); ok {
-         h.key_id = sinf.Schi.Tenc.DefaultKid[:]
+         p.key_id = sinf.Schi.Tenc.DefaultKid[:]
          // Firefox
          copy(sinf.BoxHeader.Type[:], "free")
          if sample, ok := description.SampleEntry(); ok {

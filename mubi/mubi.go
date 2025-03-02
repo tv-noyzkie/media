@@ -30,6 +30,7 @@ func (a *Authenticate) Widevine(data []byte) ([]byte, error) {
       return nil, err
    }
    req.Header.Set("dt-custom-data", base64.StdEncoding.EncodeToString(data))
+   req.Header.Set("vpn", "true")
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
@@ -105,6 +106,7 @@ func (a Address) Film() (*Film, error) {
    }
    return film1, nil
 }
+
 // to get the MPD you have to call this or view video on the website. request
 // is hard geo blocked only the first time
 func (a *Authenticate) Viewing(film1 *Film) error {
@@ -115,7 +117,7 @@ func (a *Authenticate) Viewing(film1 *Film) error {
       b = append(b, "/viewing"...)
       return string(b)
    }()
-   req.Header.Set("authorization", "Bearer " + a.Token)
+   req.Header.Set("authorization", "Bearer "+a.Token)
    req.Header.Set("client", client)
    req.Header.Set("client-country", ClientCountry)
    // use Header.Set for canonical spelling
@@ -209,17 +211,22 @@ func (c *LinkCode) Unmarshal(data Byte[LinkCode]) error {
 }
 
 type Address [1]string
+type SecureUrl struct {
+   TextTrackUrls []TextTrack `json:"text_track_urls"`
+   Url           string      // MPD
+   UserMessage   string      `json:"user_message"`
+}
 
 func (s *SecureUrl) Unmarshal(data Byte[SecureUrl]) error {
-   return json.Unmarshal(data, s)
+   err := json.Unmarshal(data, s)
+   if err != nil {
+      return err
+   }
+   if s.UserMessage != "" {
+      return errors.New(s.UserMessage)
+   }
+   return nil
 }
-
-type SecureUrl struct {
-   TextTrackUrls []TextTrack`json:"text_track_urls"`
-   Url           string // MPD
-}
-
-// geo block
 func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
    req, _ := http.NewRequest("", "https://api.mubi.com", nil)
    req.URL.Path = func() string {
@@ -228,11 +235,11 @@ func (a *Authenticate) SecureUrl(film1 *Film) (Byte[SecureUrl], error) {
       b = append(b, "/viewing/secure_url"...)
       return string(b)
    }()
-   req.Header = http.Header{
-      "authorization":  {"Bearer " + a.Token},
-      "client":         {client},
-      "client-country": {ClientCountry},
-   }
+   req.Header.Set("authorization", "Bearer "+a.Token)
+   req.Header.Set("client", client)
+   req.Header.Set("client-country", ClientCountry)
+   // use Header.Set for canonical spelling
+   req.Header.Set("vpn", "true")
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
