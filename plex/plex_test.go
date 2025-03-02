@@ -6,25 +6,25 @@ import (
    "time"
 )
 
-var watch_tests = []struct{
+var watch_tests = []struct {
    key_id string
-   path string
-   url string
+   path   string
+   url    string
 }{
    {
       key_id: "47yjtPAH46ndYmeLgBQbfw==",
-      path: "/watch/movie/southpaw-2015",
-      url: "watch.plex.tv/watch/movie/southpaw-2015",
+      path:   "/watch/movie/southpaw-2015",
+      url:    "watch.plex.tv/watch/movie/southpaw-2015",
    },
    {
-      url: "watch.plex.tv/movie/limitless",
-      path: "/movie/limitless",
+      url:    "watch.plex.tv/movie/limitless",
+      path:   "/movie/limitless",
       key_id: "", // no DRM
    },
    {
       key_id: "", // no DRM
-      path: "/show/broadchurch/season/3/episode/5",
-      url: "watch.plex.tv/show/broadchurch/season/3/episode/5",
+      path:   "/show/broadchurch/season/3/episode/5",
+      url:    "watch.plex.tv/show/broadchurch/season/3/episode/5",
    },
 }
 

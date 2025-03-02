@@ -6,16 +6,89 @@ import (
    "errors"
    "flag"
    "fmt"
+   "log"
    "os"
    "path/filepath"
 )
+
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
+}
+
+func (f *flags) download() error {
+   if f.representation != "" {
+      data, err := os.ReadFile(f.media + "/plex/User")
+      if err != nil {
+         return err
+      }
+      var user plex.User
+      err = user.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      data, err = os.ReadFile(f.media + "/plex/Metadata")
+      if err != nil {
+         return err
+      }
+      var metadata plex.Metadata
+      err = metadata.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      part, _ := metadata.Dash()
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return user.Widevine(part, data)
+      }
+      return f.e.Download(f.media+"/Mpd", f.representation)
+   }
+   data, err := plex.NewUser()
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/plex/User", data)
+   if err != nil {
+      return err
+   }
+   var user plex.User
+   err = user.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   match, err := user.Match(f.address)
+   if err != nil {
+      return err
+   }
+   data1, err := user.Metadata(match)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/plex/Metadata", data1)
+   if err != nil {
+      return err
+   }
+   var metadata plex.Metadata
+   err = metadata.Unmarshal(data1)
+   if err != nil {
+      return err
+   }
+   part, ok := metadata.Dash()
+   if !ok {
+      return errors.New(".Dash()")
+   }
+   resp, err := user.Mpd(part)
+   if err != nil {
+      return err
+   }
+   return internal.Mpd(f.media+"/Mpd", resp)
+}
 
 type flags struct {
    address        plex.Address
    e              internal.License
    get_forward    bool
    representation string
-   media string
+   media          string
 }
 
 func (f *flags) New() error {
@@ -56,37 +129,4 @@ func main() {
    default:
       flag.Usage()
    }
-}
-
-func (f *flags) download() error {
-   if f.representation != "" {
-      f.e.Widevine = func(data []byte) ([]byte, error) {
-         return user.Widevine(part, data)
-      }
-      return f.e.Download(f.media + "/Mpd", f.representation)
-   }
-   // cache user
-   // cache metadata
-   var user plex.User
-   err := user.New()
-   if err != nil {
-      return err
-   }
-   match, err := user.Match(f.address)
-   if err != nil {
-      return err
-   }
-   metadata, err := user.Metadata(match)
-   if err != nil {
-      return err
-   }
-   part, ok := metadata.Dash()
-   if !ok {
-      return errors.New(".Dash()")
-   }
-   resp, err := user.Mpd(part)
-   if err != nil {
-      return err
-   }
-   return internal.Mpd(f.media + "/Mpd", resp)
 }

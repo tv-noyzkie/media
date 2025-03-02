@@ -9,27 +9,6 @@ import (
    "strings"
 )
 
-func (m *Metadata) Unmarshal(data Byte[Metadata]) error {
-   var value struct {
-      MediaContainer struct {
-         Metadata []Metadata
-      }
-   }
-   err := json.Unmarshal(data, &value)
-   if err != nil {
-      return err
-   }
-   *m = value.MediaContainer.Metadata[0]
-   return nil
-}
-
-type Metadata struct {
-   Media []struct {
-      Part []Part
-      Protocol string
-   }
-}
-
 func (u User) Metadata(match1 *Match) (Byte[Metadata], error) {
    req, _ := http.NewRequest("", "https://vod.provider.plex.tv", nil)
    req.URL.Path = "/library/metadata/" + match1.RatingKey
@@ -46,6 +25,27 @@ func (u User) Metadata(match1 *Match) (Byte[Metadata], error) {
    return io.ReadAll(resp.Body)
 }
 
+func (m *Metadata) Unmarshal(data Byte[Metadata]) error {
+   var value struct {
+      MediaContainer struct {
+         Metadata []Metadata
+      }
+   }
+   err := json.Unmarshal(data, &value)
+   if err != nil {
+      return err
+   }
+   *m = value.MediaContainer.Metadata[0]
+   return nil
+}
+
+type Metadata struct {
+   Media []struct {
+      Part     []Part
+      Protocol string
+   }
+}
+
 func (u *User) Unmarshal(data Byte[User]) error {
    return json.Unmarshal(data, u)
 }
@@ -56,8 +56,8 @@ func NewUser() (Byte[User], error) {
    req, _ := http.NewRequest("POST", "https://plex.tv", nil)
    req.URL.Path = "/api/v2/users/anonymous"
    req.Header = http.Header{
-      "accept": {"application/json"},
-      "x-plex-product": {"Plex Mediaverse"},
+      "accept":                   {"application/json"},
+      "x-plex-product":           {"Plex Mediaverse"},
       "x-plex-client-identifier": {"!"},
    }
    resp, err := http.DefaultClient.Do(req)
@@ -76,7 +76,7 @@ func (u User) Widevine(part1 *Part, data []byte) ([]byte, error) {
    req.URL.Scheme = "https"
    req.URL.Host = "vod.provider.plex.tv"
    req.URL.RawQuery = url.Values{
-      "x-plex-drm": {"widevine"},
+      "x-plex-drm":   {"widevine"},
       "x-plex-token": {u.AuthToken},
    }.Encode()
    resp, err := http.DefaultClient.Do(req)
@@ -130,7 +130,7 @@ func (u User) Match(web Address) (*Match, error) {
    req, _ := http.NewRequest("", "https://discover.provider.plex.tv", nil)
    req.URL.Path = "/library/metadata/matches"
    req.URL.RawQuery = url.Values{
-      "url": {web[0]},
+      "url":          {web[0]},
       "x-plex-token": {u.AuthToken},
    }.Encode()
    req.Header.Set("accept", "application/json")
@@ -156,7 +156,7 @@ type Match struct {
 }
 
 type Part struct {
-   Key string
+   Key     string
    License string
 }
 
