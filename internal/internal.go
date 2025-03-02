@@ -21,11 +21,9 @@ import (
 
 func init() {
    log.SetFlags(log.Ltime)
-   // github.com/golang/go/issues/18639
-   var pro http.Protocols
-   pro.SetHTTP1(true)
    http.DefaultClient.Transport = &transport{
-      Protocols: &pro,
+      // github.com/golang/go/issues/18639
+      Protocols: &http.Protocols{},
       Proxy: http.ProxyFromEnvironment,
    }
 }
