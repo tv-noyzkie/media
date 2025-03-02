@@ -3,17 +3,31 @@ package main
 import (
    "41.neocities.org/media/ctv"
    "41.neocities.org/media/internal"
+   "41.neocities.org/platform/mullvad"
    "flag"
-   "fmt"
+   "net/http"
    "os"
    "path/filepath"
 )
 
 type flags struct {
-   address        ctv.Address
-   manifest       bool
-   representation string
-   s              internal.Stream
+   address ctv.Address
+   dash    string
+   e       internal.License
+   media   string
+   mullvad bool
+}
+
+func (f *flags) New() error {
+   var err error
+   f.media, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
+   return nil
 }
 
 func main() {
@@ -23,18 +37,17 @@ func main() {
       panic(err)
    }
    flag.Var(&f.address, "a", "address")
-   flag.StringVar(&f.s.ClientId, "c", f.s.ClientId, "client ID")
-   flag.StringVar(&f.representation, "i", "", "representation")
-   flag.BoolVar(&f.manifest, "w", false, "manifest")
-   flag.StringVar(&f.s.PrivateKey, "p", f.s.PrivateKey, "private key")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.dash, "i", "", "DASH ID")
+   flag.StringVar(&f.e.PrivateKey, "p", f.e.PrivateKey, "private key")
+   flag.BoolVar(&f.mullvad, "m", false, "Mullvad")
    flag.Parse()
+   if f.mullvad {
+      http.DefaultClient.Transport = &mullvad.Transport{}
+      defer mullvad.Disconnect()
+   }
    switch {
-   case f.manifest:
-      err := f.get_manifest()
-      if err != nil {
-         panic(err)
-      }
-   case f.address.String() != "":
+   case f.address[0] != "":
       err := f.download()
       if err != nil {
          panic(err)
@@ -44,18 +57,11 @@ func main() {
    }
 }
 
-func (f *flags) New() error {
-   home, err := os.UserHomeDir()
-   if err != nil {
-      return err
+func (f *flags) download() error {
+   if f.dash != "" {
+      f.e.Widevine = ctv.Widevine
+      return f.e.Download(f.media+"/Mpd", f.dash)
    }
-   home = filepath.ToSlash(home)
-   f.s.ClientId = home + "/widevine/client_id.bin"
-   f.s.PrivateKey = home + "/widevine/private_key.pem"
-   return nil
-}
-
-func (f *flags) get_manifest() error {
    resolve, err := f.address.Resolve()
    if err != nil {
       return err
@@ -68,35 +74,13 @@ func (f *flags) get_manifest() error {
    if err != nil {
       return err
    }
-   data, err := ctv.Manifest{}.Marshal(axis, content)
+   address, err := axis.Mpd(content)
    if err != nil {
       return err
    }
-   return os.WriteFile("manifest.txt", data, os.ModePerm)
-}
-
-func (f *flags) download() error {
-   data, err := os.ReadFile("manifest.txt")
+   resp, err := http.Get(address)
    if err != nil {
       return err
    }
-   var manifest ctv.Manifest
-   err = manifest.Unmarshal(data)
-   if err != nil {
-      return err
-   }
-   represents, err := internal.Mpd(manifest)
-   if err != nil {
-      return err
-   }
-   for _, represent := range represents {
-      switch f.representation {
-      case "":
-         fmt.Print(&represent, "\n\n")
-      case represent.Id:
-         f.s.Client = ctv.Client{}
-         return f.s.Download(&represent)
-      }
-   }
-   return nil
+   return internal.Mpd(f.media+"/Mpd", resp)
 }

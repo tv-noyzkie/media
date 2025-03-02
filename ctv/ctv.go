@@ -10,6 +10,48 @@ import (
    "strings"
 )
 
+func (a *AxisContent) Mpd(content1 *Content) (string, error) {
+   req, _ := http.NewRequest("", "https://capi.9c9media.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/destinations/")
+      b = append(b, a.AxisPlaybackLanguages[0].DestinationCode...)
+      b = append(b, "/platforms/desktop/playback/contents/"...)
+      b = strconv.AppendInt(b, a.AxisId, 10)
+      b = append(b, "/contentPackages/"...)
+      b = strconv.AppendInt(b, content1.ContentPackages[0].Id, 10)
+      b = append(b, "/manifest.mpd"...)
+      return string(b)
+   }()
+   req.URL.RawQuery = "action=reference"
+   req.Header.Set("vpn", "true")
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return "", err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return "", err
+   }
+   data1 := string(data)
+   if resp.StatusCode != http.StatusOK {
+      return "", errors.New(data1)
+   }
+   return strings.Replace(data1, "/best/", "/ultimate/", 1), nil
+}
+
+func Widevine(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      "https://license.9c9media.ca/widevine", "application/x-protobuf",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
 func (a Address) String() string {
    return a[0]
 }
@@ -38,18 +80,6 @@ query axisContent($id: ID!) {
 // this is better than strings.Replace and strings.ReplaceAll
 func graphql_compact(data string) string {
    return strings.Join(strings.Fields(data), " ")
-}
-
-func Widevine(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      "https://license.9c9media.ca/widevine", "application/x-protobuf",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 type Address [1]string
@@ -210,30 +240,4 @@ type AxisContent struct {
    AxisPlaybackLanguages []struct {
       DestinationCode string
    }
-}
-
-// hard geo block
-func (a *AxisContent) Mpd(content1 *Content) (string, error) {
-   req, _ := http.NewRequest("", "https://capi.9c9media.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/destinations/")
-      b = append(b, a.AxisPlaybackLanguages[0].DestinationCode...)
-      b = append(b, "/platforms/desktop/playback/contents/"...)
-      b = strconv.AppendInt(b, a.AxisId, 10)
-      b = append(b, "/contentPackages/"...)
-      b = strconv.AppendInt(b, content1.ContentPackages[0].Id, 10)
-      b = append(b, "/manifest.mpd"...)
-      return string(b)
-   }()
-   req.URL.RawQuery = "action=reference"
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return "", err
-   }
-   defer resp.Body.Close()
-   data, err := io.ReadAll(resp.Body)
-   if err != nil {
-      return "", err
-   }
-   return strings.Replace(string(data), "/best/", "/ultimate/", 1), nil
 }
