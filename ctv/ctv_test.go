@@ -5,20 +5,20 @@ import (
    "time"
 )
 
-var tests = []struct{
+var tests = []struct {
    content_id string
-   key_id string
-   path string
-   url string
+   key_id     string
+   path       string
+   url        string
 }{
    {
-      url: "ctv.ca/movies/fools-rush-in-57470",
-      key_id: "A98dtspZsb9/z++3IHp0Dw==",
+      url:        "ctv.ca/movies/fools-rush-in-57470",
+      key_id:     "A98dtspZsb9/z++3IHp0Dw==",
       content_id: "ZmYtOGYyNjEzYWUtNTIxNTAx",
-      path: "/movies/fools-rush-in-57470",
+      path:       "/movies/fools-rush-in-57470",
    },
    {
-      url: "ctv.ca/shows/friends/the-one-with-the-chicken-pox-s2e23",
+      url:  "ctv.ca/shows/friends/the-one-with-the-chicken-pox-s2e23",
       path: "/shows/friends/the-one-with-the-chicken-pox-s2e23",
    },
 }

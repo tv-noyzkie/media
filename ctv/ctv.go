@@ -83,47 +83,6 @@ func (a *AxisContent) Content() (*Content, error) {
    return content1, nil
 }
 
-func (m *Manifest) Unmarshal(data []byte) error {
-   (*m)[0] = strings.Replace(string(data), "/best/", "/ultimate/", 1)
-   return nil
-}
-
-type Manifest [1]string // MPD
-
-// hard geo block
-func (Manifest) Marshal(axis *AxisContent, content1 *Content) ([]byte, error) {
-   req, _ := http.NewRequest("", "https://capi.9c9media.com", nil)
-   req.URL.Path = func() string {
-      b := []byte("/destinations/")
-      b = append(b, axis.AxisPlaybackLanguages[0].DestinationCode...)
-      b = append(b, "/platforms/desktop/playback/contents/"...)
-      b = strconv.AppendInt(b, axis.AxisId, 10)
-      b = append(b, "/contentPackages/"...)
-      b = strconv.AppendInt(b, content1.ContentPackages[0].Id, 10)
-      b = append(b, "/manifest.mpd"...)
-      return string(b)
-   }()
-   req.URL.RawQuery = "action=reference"
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   if resp.StatusCode != http.StatusOK {
-      var data strings.Builder
-      resp.Write(&data)
-      return nil, errors.New(data.String())
-   }
-   return io.ReadAll(resp.Body)
-}
-
-type AxisContent struct {
-   AxisId                int64
-   AxisPlaybackLanguages []struct {
-      DestinationCode string
-   }
-}
-
 const query_resolve = `
 query resolvePath($path: String!) {
    resolvedPath(path: $path) {
@@ -194,7 +153,7 @@ type ResolvedPath struct {
    FirstPlayableContent *struct {
       Id string
    }
-   Id                   string
+   Id string
 }
 
 func (r *ResolvedPath) get_id() string {
@@ -244,4 +203,37 @@ func (r *ResolvedPath) Axis() (*AxisContent, error) {
       return nil, errors.New(value.Errors[0].Message)
    }
    return &value.Data.AxisContent, nil
+}
+
+type AxisContent struct {
+   AxisId                int64
+   AxisPlaybackLanguages []struct {
+      DestinationCode string
+   }
+}
+
+// hard geo block
+func (a *AxisContent) Mpd(content1 *Content) (string, error) {
+   req, _ := http.NewRequest("", "https://capi.9c9media.com", nil)
+   req.URL.Path = func() string {
+      b := []byte("/destinations/")
+      b = append(b, a.AxisPlaybackLanguages[0].DestinationCode...)
+      b = append(b, "/platforms/desktop/playback/contents/"...)
+      b = strconv.AppendInt(b, a.AxisId, 10)
+      b = append(b, "/contentPackages/"...)
+      b = strconv.AppendInt(b, content1.ContentPackages[0].Id, 10)
+      b = append(b, "/manifest.mpd"...)
+      return string(b)
+   }()
+   req.URL.RawQuery = "action=reference"
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return "", err
+   }
+   defer resp.Body.Close()
+   data, err := io.ReadAll(resp.Body)
+   if err != nil {
+      return "", err
+   }
+   return strings.Replace(string(data), "/best/", "/ultimate/", 1), nil
 }
