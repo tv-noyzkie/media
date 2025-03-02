@@ -3,7 +3,6 @@ package plex
 import (
    "bytes"
    "encoding/json"
-   "errors"
    "io"
    "net/http"
    "net/url"
@@ -66,24 +65,8 @@ func (u User) Match(web Address) (*Match, error) {
    return &value.MediaContainer.Metadata[0], nil
 }
 
-type User struct {
-   AuthToken string
-}
-
 type Match struct {
    RatingKey string
-}
-
-type Part struct {
-   Key string
-   License string
-}
-
-type Metadata struct {
-   Media []struct {
-      Part []Part
-      Protocol string
-   }
 }
 
 func (u User) Metadata(match1 *Match) (*Metadata, error) {
@@ -111,35 +94,39 @@ func (u User) Metadata(match1 *Match) (*Metadata, error) {
    return &value.MediaContainer.Metadata[0], nil
 }
 
-///
-
-type Client struct {
-   AuthToken string
-   Part Part
+type Metadata struct {
+   Media []struct {
+      Part []Part
+      Protocol string
+   }
 }
 
-func (m *Metadata) Dash(user1 User) (*Client, bool) {
+func (m *Metadata) Dash() (*Part, bool) {
    for _, media := range m.Media {
       if media.Protocol == "dash" {
-         var c Client
-         c.AuthToken = user1.AuthToken
-         c.Part = media.Part[0]
-         return &c, true
+         return &media.Part[0], true
       }
    }
    return nil, false
 }
 
-func (c *Client) Mpd() (*http.Response, error) {
-   req, err := http.NewRequest("", c.Part.Key, nil)
+type Part struct {
+   Key string
+   License string
+}
+
+type User struct {
+   AuthToken string
+}
+
+func (u User) Mpd(part1 *Part) (*http.Response, error) {
+   req, err := http.NewRequest("", part1.Key, nil)
    if err != nil {
       return nil, err
    }
    req.URL.Scheme = "https"
    req.URL.Host = "vod.provider.plex.tv"
-   req.URL.RawQuery = url.Values{
-      "x-plex-token": {c.AuthToken},
-   }.Encode()
+   req.URL.RawQuery = "x-plex-token=" + u.AuthToken
    req.Header = http.Header{}
    if ForwardedFor != "" {
       req.Header.Set("x-forwarded-for", ForwardedFor)
@@ -147,8 +134,8 @@ func (c *Client) Mpd() (*http.Response, error) {
    return http.DefaultClient.Do(req)
 }
 
-func (c *Client) License(data []byte) ([]byte, error) {
-   req, err := http.NewRequest("POST", c.Part.License, bytes.NewReader(data))
+func (u User) Widevine(part1 *Part, data []byte) ([]byte, error) {
+   req, err := http.NewRequest("POST", part1.License, bytes.NewReader(data))
    if err != nil {
       return nil, err
    }
@@ -156,7 +143,7 @@ func (c *Client) License(data []byte) ([]byte, error) {
    req.URL.Host = "vod.provider.plex.tv"
    req.URL.RawQuery = url.Values{
       "x-plex-drm": {"widevine"},
-      "x-plex-token": {c.AuthToken},
+      "x-plex-token": {u.AuthToken},
    }.Encode()
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
