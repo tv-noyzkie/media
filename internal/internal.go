@@ -107,8 +107,14 @@ func Mpd(name string, resp *http.Response) error {
       return err
    }
    defer file.Close()
-   fmt.Fprintln(file, resp.Request.URL)
-   file.Write(data)
+   _, err = fmt.Fprintln(file, resp.Request.URL)
+   if err != nil {
+      return err
+   }
+   _, err = file.Write(data)
+   if err != nil {
+      return err
+   }
    var media dash.Mpd
    err = media.Unmarshal(data)
    if err != nil {
