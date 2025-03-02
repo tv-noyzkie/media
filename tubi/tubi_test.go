@@ -13,7 +13,7 @@ var tests = []struct {
 }{
    {
       content_id: 100001047,
-      url: "tubitv.com/movies/100001047",
+      url:        "tubitv.com/movies/100001047",
    },
    {
       content_id: 200042567,
