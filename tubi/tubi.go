@@ -7,61 +7,10 @@ import (
    "net/http"
    "net/url"
    "strconv"
-   "strings"
 )
 
-type Content struct {
-   Children       []*Content
-   DetailedType   string `json:"detailed_type"`
-   Id             int    `json:",string"`
-   SeriesId       int    `json:"series_id,string"`
-   VideoResources []VideoResource `json:"video_resources"`
-   parent         *Content
-}
-
-type Resolution [1]int64
-
-func (r *Resolution) UnmarshalText(data []byte) error {
-   var err error
-   data1 := strings.TrimPrefix(string(data), "VIDEO_RESOLUTION_")
-   (*r)[0], err = strconv.ParseInt(strings.TrimSuffix(data1, "P"), 10, 64)
-   if err != nil {
-      return err
-   }
-   return nil
-}
-
-func (c *Content) Series() bool {
-   return c.DetailedType == "series"
-}
-
-func (c *Content) Episode() bool {
-   return c.DetailedType == "episode"
-}
-
-func (r Resolution) MarshalText() ([]byte, error) {
-   data := []byte("VIDEO_RESOLUTION_")
-   data = strconv.AppendInt(data, r[0], 10)
-   return append(data, 'P'), nil
-}
-
-func (c *Content) set(parent *Content) {
-   c.parent = parent
-   for _, child := range c.Children {
-      child.set(c)
-   }
-}
-
-func (c *Content) Unmarshal(data []byte) error {
-   err := json.Unmarshal(data, c)
-   if err != nil {
-      return err
-   }
-   c.set(nil)
-   return nil
-}
-
-func (Content) Marshal(id int) ([]byte, error) {
+// geo block
+func (c *Content) New(id int) error {
    req, _ := http.NewRequest("", "https://uapi.adrise.tv/cms/content", nil)
    req.URL.RawQuery = url.Values{
       "content_id": {strconv.Itoa(id)},
@@ -74,14 +23,27 @@ func (Content) Marshal(id int) ([]byte, error) {
    }.Encode()
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
-      return nil, err
+      return err
    }
    defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
+   return json.NewDecoder(resp.Body).Decode(c)
 }
 
-func (v *VideoResource) Mpd() (*http.Response, error) {
-   return http.Get(v.Manifest.Url)
+type Content struct {
+   Children       []*Content
+   DetailedType   string `json:"detailed_type"`
+   Id             int    `json:",string"`
+   SeriesId       int    `json:"series_id,string"`
+   // these should already be in reverse order by resolution
+   VideoResources []VideoResource `json:"video_resources"`
+}
+
+func (c *Content) Series() bool {
+   return c.DetailedType == "series"
+}
+
+func (c *Content) Episode() bool {
+   return c.DetailedType == "episode"
 }
 
 type VideoResource struct {
@@ -89,21 +51,9 @@ type VideoResource struct {
       Url string
    } `json:"license_server"`
    Manifest struct {
-      Url string
+      Url string // MPD
    }
-   Resolution Resolution
    Type       string
-}
-
-func (v *VideoResource) License(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      v.LicenseServer.Url, "application/x-protobuf", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 func (c *Content) Get(id int) (*Content, bool) {
@@ -119,15 +69,15 @@ func (c *Content) Get(id int) (*Content, bool) {
    return nil, false
 }
 
-func (c *Content) Resource() (*VideoResource, bool) {
-   if len(c.VideoResources) == 0 {
-      return nil, false
+type Byte[T any] []byte
+
+func (v *VideoResource) License(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      v.LicenseServer.Url, "application/x-protobuf", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
    }
-   a := c.VideoResources[0]
-   for _, b := range c.VideoResources {
-      if b.Resolution[0] > a.Resolution[0] {
-         a = b
-      }
-   }
-   return &a, true
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
 }

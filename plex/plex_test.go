@@ -12,9 +12,8 @@ var watch_tests = []struct {
    url    string
 }{
    {
-      key_id: "47yjtPAH46ndYmeLgBQbfw==",
-      path:   "/watch/movie/southpaw-2015",
-      url:    "watch.plex.tv/watch/movie/southpaw-2015",
+      path: "/movie/american-psycho",
+      url: "watch.plex.tv/movie/american-psycho",
    },
    {
       url:    "watch.plex.tv/movie/limitless",

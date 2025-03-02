@@ -12,9 +12,8 @@ var tests = []struct {
    url        string
 }{
    {
-      content_id: 608618,
-      key_id:     "uKDa+nwfR1ioDg5Oj7WeFw==",
-      url:        "tubitv.com/movies/608618",
+      content_id: 100001047,
+      url: "tubitv.com/movies/100001047",
    },
    {
       content_id: 200042567,
