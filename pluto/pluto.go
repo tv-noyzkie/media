@@ -10,6 +10,26 @@ import (
    "strings"
 )
 
+func Widevine(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      "https://service-concierge.clusters.pluto.tv/v1/wv/alt",
+      "application/x-protobuf", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+// The Request's URL and Header fields must be initialized
+func (f File) Mpd() (*http.Response, error) {
+   var req http.Request
+   req.URL = &f[0]
+   req.Header = http.Header{}
+   return http.DefaultClient.Do(&req)
+}
+
 // these return a valid response body, but response status is "403 OK":
 // http://siloh-fs.plutotv.net
 // http://siloh-ns1.plutotv.net
@@ -84,14 +104,6 @@ func (c *Clips) Dash() (*File, bool) {
 }
 
 type File [1]url.URL
-
-// The Request's URL and Header fields must be initialized
-func (f File) Mpd() (*http.Response, error) {
-   var req http.Request
-   req.URL = &f[0]
-   req.Header = http.Header{}
-   return http.DefaultClient.Do(&req)
-}
 
 var ForwardedFor string
 
@@ -173,16 +185,4 @@ func (v *Vod) Clips() (*Clips, error) {
       return nil, err
    }
    return &clips1[0], nil
-}
-
-func Widevine(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      "https://service-concierge.clusters.pluto.tv/v1/wv/alt",
-      "application/x-protobuf", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
