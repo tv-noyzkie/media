@@ -9,8 +9,14 @@ import (
 var tests = []struct {
    content_id int
    key_id     string
+   location   string
    url        string
 }{
+   {
+      content_id: 643397,
+      location:   "Australia",
+      url:        "tubitv.com/movies/643397",
+   },
    {
       content_id: 100001047,
       url:        "tubitv.com/movies/100001047",
