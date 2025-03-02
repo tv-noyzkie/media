@@ -5,7 +5,7 @@ import (
    "41.neocities.org/sofia/file"
    "41.neocities.org/sofia/pssh"
    "41.neocities.org/widevine"
-   xhttp "41.neocities.org/x/http"
+   "41.neocities.org/x/progress"
    "bytes"
    "encoding/base64"
    "errors"
@@ -31,7 +31,9 @@ func init() {
 type transport http.Transport
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-   log.Println(req.Method, req.URL)
+   if req.Header.Get("silent") == "" {
+      log.Println(req.Method, req.URL)
+   }
    return (*http.Transport)(t).RoundTrip(req)
 }
 
@@ -218,8 +220,8 @@ func (e *License) segment_template(represent *dash.Representation) error {
    for represent1 := range represent.Representation() {
       segments = slices.AppendSeq(segments, represent1.Segment())
    }
-   var progress xhttp.ProgressParts
-   progress.Set(len(segments))
+   var parts progress.Parts
+   parts.Set(len(segments))
    head := http.Header{}
    head.Set("silent", "true")
    for _, segment := range segments {
@@ -231,7 +233,7 @@ func (e *License) segment_template(represent *dash.Representation) error {
       if err != nil {
          return err
       }
-      progress.Next()
+      parts.Next()
       data, err = write_segment(data, key)
       if err != nil {
          return err
@@ -285,8 +287,8 @@ func (e *License) segment_base(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   var progress xhttp.ProgressParts
-   progress.Set(len(file_file.Sidx.Reference))
+   var parts progress.Parts
+   parts.Set(len(file_file.Sidx.Reference))
    head := http.Header{}
    head.Set("silent", "true")
    for _, reference := range file_file.Sidx.Reference {
@@ -297,7 +299,7 @@ func (e *License) segment_base(represent *dash.Representation) error {
       if err != nil {
          return err
       }
-      progress.Next()
+      parts.Next()
       data, err = write_segment(data, key)
       if err != nil {
          return err
@@ -341,8 +343,8 @@ func (e *License) segment_list(represent *dash.Representation) error {
    if err != nil {
       return err
    }
-   var progress xhttp.ProgressParts
-   progress.Set(len(represent.SegmentList.SegmentUrl))
+   var parts progress.Parts
+   parts.Set(len(represent.SegmentList.SegmentUrl))
    head := http.Header{}
    head.Set("silent", "true")
    for _, segment := range represent.SegmentList.SegmentUrl {
@@ -354,7 +356,7 @@ func (e *License) segment_list(represent *dash.Representation) error {
       if err != nil {
          return err
       }
-      progress.Next()
+      parts.Next()
       data, err = write_segment(data, key)
       if err != nil {
          return err

@@ -3,14 +3,12 @@ package main
 import (
    "41.neocities.org/media/ctv"
    "41.neocities.org/media/internal"
-   "41.neocities.org/x/http"
    "flag"
    "os"
    "path/filepath"
 )
 
 func main() {
-   http.Transport{}.DefaultClient()
    var f flags
    err := f.New()
    if err != nil {

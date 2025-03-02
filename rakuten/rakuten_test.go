@@ -2,15 +2,11 @@ package rakuten
 
 import (
    "41.neocities.org/platform/mullvad"
-   "41.neocities.org/x/http"
    "errors"
    "testing"
 )
 
 func Test(t *testing.T) {
-   var port http.Transport
-   port.ProxyFromEnvironment()
-   port.DefaultClient()
    for _, test := range web_tests {
       content, err := test.content()
       if err != nil {

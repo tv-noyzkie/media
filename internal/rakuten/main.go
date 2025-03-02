@@ -3,7 +3,6 @@ package main
 import (
    "41.neocities.org/media/internal"
    "41.neocities.org/media/rakuten"
-   "41.neocities.org/x/http"
    "flag"
    "log"
    "os"
@@ -11,10 +10,6 @@ import (
 )
 
 func main() {
-   log.SetFlags(log.Ltime)
-   var port http.Transport
-   port.ProxyFromEnvironment()
-   port.DefaultClient()
    var f flags
    err := f.New()
    if err != nil {

@@ -1,7 +1,6 @@
 package sky
 
 import (
-   "41.neocities.org/x/http"
    "fmt"
    "log"
    "os"
@@ -24,10 +23,6 @@ func TestRead(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
-   var port http.Transport
-   port.ProxyFromEnvironment()
-   port.DefaultClient()
-   log.SetFlags(log.Ltime)
    data, err := exec.Command("password", "sky.ch").Output()
    if err != nil {
       t.Fatal(err)
