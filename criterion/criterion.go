@@ -7,27 +7,9 @@ import (
    "io"
    "net/http"
    "net/url"
-   "strings"
 )
 
-const client_id = "9a87f110f79cd25250f6c7f3a6ec8b9851063ca156dae493bf362a7faf146c78"
-
-func (f Files) Dash() (*File, bool) {
-   for _, file1 := range f {
-      if file1.Method == "dash" {
-         return &file1, true
-      }
-   }
-   return nil, false
-}
-
-type Token struct {
-   AccessToken string `json:"access_token"`
-}
-
-type Files []File
-
-func (t *Token) Files(video1 *Video) (Files, error) {
+func (t Token) Files(video1 *Video) (Files, error) {
    req, err := http.NewRequest("", video1.Links.Files.Href, nil)
    if err != nil {
       return nil, err
@@ -46,16 +28,6 @@ func (t *Token) Files(video1 *Video) (Files, error) {
    return files1, nil
 }
 
-type Video struct {
-   Links struct {
-      Files struct {
-         Href string
-      }
-   } `json:"_links"`
-   Message string
-   Name string
-}
-
 type File struct {
    DrmAuthorizationToken string `json:"drm_authorization_token"`
    Links                 struct {
@@ -66,7 +38,34 @@ type File struct {
    Method string
 }
 
-func (t *Token) Video(slug string) (*Video, error) {
+func (f Files) Dash() (*File, bool) {
+   for _, file1 := range f {
+      if file1.Method == "dash" {
+         return &file1, true
+      }
+   }
+   return nil, false
+}
+
+const client_id = "9a87f110f79cd25250f6c7f3a6ec8b9851063ca156dae493bf362a7faf146c78"
+
+type Files []File
+
+type Video struct {
+   Links struct {
+      Files struct {
+         Href string
+      }
+   } `json:"_links"`
+   Message string
+   Name string
+}
+
+type Token struct {
+   AccessToken string `json:"access_token"`
+}
+
+func (t Token) Video(slug string) (*Video, error) {
    req, _ := http.NewRequest("", "https://api.vhx.com", nil)
    req.URL.Path = "/videos/" + slug
    req.URL.RawQuery = "url=" + url.QueryEscape(slug)
@@ -103,13 +102,9 @@ func (f *File) Widevine(data []byte) ([]byte, error) {
    return io.ReadAll(resp.Body)
 }
 
-///
+type Byte[T any] []byte
 
-func (t *Token) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, t)
-}
-
-func (Token) Marshal(username, password string) ([]byte, error) {
+func NewToken(username, password string) (Byte[Token], error) {
    resp, err := http.PostForm("https://auth.vhx.com/v1/oauth/token", url.Values{
       "client_id":  {client_id},
       "grant_type": {"password"},
@@ -121,4 +116,8 @@ func (Token) Marshal(username, password string) ([]byte, error) {
    }
    defer resp.Body.Close()
    return io.ReadAll(resp.Body)
+}
+
+func (t *Token) Unmarshal(data Byte[Token]) error {
+   return json.Unmarshal(data, t)
 }
