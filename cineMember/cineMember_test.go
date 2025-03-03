@@ -3,8 +3,8 @@ package cineMember
 import "testing"
 
 var tests = []string{
-   "cinemember.nl/films/american-hustle",
-   "cinemember.nl/films/knives-out",
+   "https://cinemember.nl/films/american-hustle",
+   "https://cinemember.nl/films/knives-out",
 }
 
 func Test(t *testing.T) {

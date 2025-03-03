@@ -3,12 +3,12 @@ package main
 import (
    "41.neocities.org/media/cineMember"
    "41.neocities.org/media/internal"
+   "41.neocities.org/platform/mullvad"
    "errors"
    "flag"
-   "fmt"
    "log"
+   "net/http"
    "os"
-   "path"
    "path/filepath"
 )
 
@@ -18,6 +18,7 @@ type flags struct {
    e        internal.License
    email    string
    media    string
+   mullvad  bool
    password string
 }
 
@@ -45,7 +46,11 @@ func main() {
    flag.StringVar(&f.dash, "i", "", "DASH ID")
    flag.StringVar(&f.e.PrivateKey, "k", f.e.PrivateKey, "private key")
    flag.StringVar(&f.password, "p", "", "password")
+   flag.BoolVar(&f.mullvad, "m", false, "Mullvad")
    flag.Parse()
+   if f.mullvad {
+      http.DefaultClient.Transport = &mullvad.Transport{}
+   }
    switch {
    case f.password != "":
       err := f.write_user()
@@ -63,8 +68,8 @@ func main() {
 }
 
 func (f *flags) write_file(name string, data []byte) error {
-   log.Println("WriteFile", f.media + name)
-   return os.WriteFile(f.media + name, data, os.ModePerm)
+   log.Println("WriteFile", f.media+name)
+   return os.WriteFile(f.media+name, data, os.ModePerm)
 }
 
 func (f *flags) write_user() error {
@@ -72,13 +77,25 @@ func (f *flags) write_user() error {
    if err != nil {
       return err
    }
-   return f.write_file(f.media + "/cineMember/User", data)
+   return f.write_file("/cineMember/User", data)
 }
 
 func (f *flags) download() error {
    if f.dash != "" {
-      f.e.Client = title
-      return f.e.Download(&represent)
+      data, err := os.ReadFile(f.media + "/cineMember/Play")
+      if err != nil {
+         return err
+      }
+      var play cineMember.Play
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      title, _ := play.Dash()
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return title.Widevine(data)
+      }
+      return f.e.Download(f.media+"/Mpd", f.dash)
    }
    data, err := os.ReadFile(f.media + "/cineMember/User")
    if err != nil {
@@ -97,7 +114,16 @@ func (f *flags) download() error {
    if !ok {
       return errors.New(".Film()")
    }
-   play, err := user.Play(article, asset)
+   data, err = user.Play(article, asset)
+   if err != nil {
+      return err
+   }
+   var play cineMember.Play
+   err = play.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/cineMember/Play", data)
    if err != nil {
       return err
    }
@@ -109,5 +135,5 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   return internal.Mpd(f.media + "/Mpd", resp)
+   return internal.Mpd(f.media+"/Mpd", resp)
 }

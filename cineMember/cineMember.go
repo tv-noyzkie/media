@@ -9,22 +9,29 @@ import (
    "strings"
 )
 
-type Entitlement struct {
-   KeyDeliveryUrl string `json:"key_delivery_url"`
-   Manifest string // MPD
-   Protocol string
+func (p *Play) Unmarshal(data Byte[Play]) error {
+   err := json.Unmarshal(data, p)
+   if err != nil {
+      return err
+   }
+   if len(p.Errors) >= 1 {
+      return errors.New(p.Errors[0].Message)
+   }
+   return nil
 }
 
-func (a *Play) Dash() (*Entitlement, bool) {
-   for _, title := range a.Data.ArticleAssetPlay.Entitlements {
-      if title.Protocol == "dash" {
-         return &title, true
+type Play struct {
+   Data struct {
+      ArticleAssetPlay struct {
+         Entitlements []Entitlement
       }
    }
-   return nil, false
+   Errors []struct {
+      Message string
+   }
 }
 
-func (u User) Play(article1 *Article, asset1 *Asset) (*Play, error) {
+func (u User) Play(article1 *Article, asset1 *Asset) (Byte[Play], error) {
    data, err := json.Marshal(map[string]any{
       "query": query_asset,
       "variables": map[string]int{
@@ -51,12 +58,22 @@ func (u User) Play(article1 *Article, asset1 *Asset) (*Play, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   play1 := &Play{}
-   err = json.NewDecoder(resp.Body).Decode(play1)
-   if err != nil {
-      return nil, err
+   return io.ReadAll(resp.Body)
+}
+
+type Entitlement struct {
+   KeyDeliveryUrl string `json:"key_delivery_url"`
+   Manifest string // MPD
+   Protocol string
+}
+
+func (p *Play) Dash() (*Entitlement, bool) {
+   for _, title := range p.Data.ArticleAssetPlay.Entitlements {
+      if title.Protocol == "dash" {
+         return &title, true
+      }
    }
-   return play1, nil
+   return nil, false
 }
 
 func (a *Article) Film() (*Asset, bool) {
@@ -176,17 +193,6 @@ func (a *Address) Set(data string) error {
    return nil
 }
 
-func (e *Entitlement) License(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      e.KeyDeliveryUrl, "application/x-protobuf", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
 type Byte[T any] []byte
 
 func (u *User) Unmarshal(data Byte[User]) error {
@@ -207,17 +213,6 @@ type User struct {
    AccessToken string `json:"access_token"`
 }
 
-type Play struct {
-   Data struct {
-      ArticleAssetPlay struct {
-         Entitlements []Entitlement
-      }
-   }
-   Errors []struct {
-      Message string
-   }
-}
-
 type Asset struct {
    Id         int
    LinkedType string `json:"linked_type"`
@@ -227,3 +222,14 @@ type Article struct {
    Assets []Asset
    Id     int
 }
+func (e *Entitlement) Widevine(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      e.KeyDeliveryUrl, "application/x-protobuf", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
