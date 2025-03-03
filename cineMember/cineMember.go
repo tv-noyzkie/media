@@ -9,6 +9,12 @@ import (
    "strings"
 )
 
+type Entitlement struct {
+   KeyDeliveryUrl string `json:"key_delivery_url"`
+   Manifest string // MPD
+   Protocol string
+}
+
 func (a Address) Article() (*Article, error) {
    data, err := json.Marshal(map[string]any{
       "query": query_article,
@@ -39,28 +45,6 @@ func (a Address) Article() (*Article, error) {
    return &value.Data.Article, nil
 }
 
-func (User) Marshal(email, password string) ([]byte, error) {
-   data, err := json.Marshal(map[string]any{
-      "query": query_user,
-      "variables": map[string]string{
-         "email": email,
-         "password": password,
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   resp, err := http.Post(
-      "https://api.audienceplayer.com/graphql/2/user",
-      "application/json", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
 const query_user = `
 mutation UserAuthenticate($email: String, $password: String) {
    UserAuthenticate(email: $email, password: $password) {
@@ -85,34 +69,6 @@ mutation ArticleAssetPlay($article_id: Int, $asset_id: Int) {
 
 type Address [1]string
 
-type Entitlement struct {
-   KeyDeliveryUrl string `json:"key_delivery_url"`
-   Manifest string
-   Protocol string
-}
-
-// UserAuthenticate
-type User struct {
-   Data struct {
-      UserAuthenticate struct {
-         AccessToken string `json:"access_token"`
-      }
-   }
-}
-
-// ArticleAssetPlay
-type Play struct {
-   Data struct {
-      ArticleAssetPlay struct {
-         Entitlements []Entitlement
-      }
-   }
-   Errors []struct {
-      Message string
-   }
-}
-
-// NO ANONYMOUS QUERY
 const query_article = `
 query Article($articleUrlSlug: String) {
    Article(full_url_slug: $articleUrlSlug) {
@@ -127,11 +83,7 @@ query Article($articleUrlSlug: String) {
       }
    }
 }
-`
-
-func (u *User) Unmarshal(data []byte) error {
-   return json.Unmarshal(data, u)
-}
+` // do not use `query(`
 
 func (a Address) String() string {
    return a[0]
@@ -149,19 +101,104 @@ func (a *Address) Set(data string) error {
    return nil
 }
 
+func (e *Entitlement) License(data []byte) ([]byte, error) {
+   resp, err := http.Post(
+      e.KeyDeliveryUrl, "application/x-protobuf", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (a *Play) Dash() (*Entitlement, bool) {
+   for _, title := range a.Data.ArticleAssetPlay.Entitlements {
+      if title.Protocol == "dash" {
+         return &title, true
+      }
+   }
+   return nil, false
+}
+
+func (a *Article) Film() (*Asset, bool) {
+   for _, asset1 := range a.Assets {
+      if asset1.LinkedType == "film" {
+         return &asset1, true
+      }
+   }
+   return nil, false
+}
+
+type Byte[T any] []byte
+
+func NewUser(email, password string) (Byte[User], error) {
+   data, err := json.Marshal(map[string]any{
+      "query": query_user,
+      "variables": map[string]string{
+         "email": email,
+         "password": password,
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   resp, err := http.Post(
+      "https://api.audienceplayer.com/graphql/2/user",
+      "application/json", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (u *User) Unmarshal(data Byte[User]) error {
+   var value struct {
+      Data struct {
+         UserAuthenticate User
+      }
+   }
+   err := json.Unmarshal(data, &value)
+   if err != nil {
+      return err
+   }
+   *u = value.Data.UserAuthenticate
+   return nil
+}
+
+type User struct {
+   AccessToken string `json:"access_token"`
+}
+
+type Play struct {
+   Data struct {
+      ArticleAssetPlay struct {
+         Entitlements []Entitlement
+      }
+   }
+   Errors []struct {
+      Message string
+   }
+}
+
 type Asset struct {
    Id         int
    LinkedType string `json:"linked_type"`
-   article    *Article
 }
 
-// hard geo block
-func (Play) Marshal(user1 *User, asset *Asset) ([]byte, error) {
+type Article struct {
+   Assets []Asset
+   Id     int
+}
+
+func (u User) Play(article1 *Article, asset1 *Asset) (*Play, error) {
    data, err := json.Marshal(map[string]any{
       "query": query_asset,
       "variables": map[string]int{
-         "article_id": asset.article.Id,
-         "asset_id": asset.Id,
+         "article_id": article1.Id,
+         "asset_id": asset1.Id,
       },
    })
    if err != nil {
@@ -174,64 +211,19 @@ func (Play) Marshal(user1 *User, asset *Asset) ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   req.Header = http.Header{
-      "authorization": {"Bearer " + user1.Data.UserAuthenticate.AccessToken},
-      "content-type":  {"application/json"},
-   }
+   // need .Set to match .Get
+   req.Header.Set("authorization", "Bearer " + u.AccessToken)
+   req.Header.Set("content-type", "application/json")
+   req.Header.Set("vpn", "true")
    resp, err := http.DefaultClient.Do(req)
    if err != nil {
       return nil, err
    }
    defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-func (p *Play) Unmarshal(data []byte) error {
-   err := json.Unmarshal(data, p)
-   if err != nil {
-      return err
-   }
-   if len(p.Errors) >= 1 {
-      return errors.New(p.Errors[0].Message)
-   }
-   return nil
-}
-
-type Article struct {
-   Assets []Asset
-   Id     int
-}
-
-func (a *Article) Film() (*Asset, bool) {
-   for _, asset1 := range a.Assets {
-      if asset1.LinkedType == "film" {
-         asset1.article = a
-         return &asset1, true
-      }
-   }
-   return nil, false
-}
-
-func (a *Play) Dash() (*Entitlement, bool) {
-   for _, title := range a.Data.ArticleAssetPlay.Entitlements {
-      if title.Protocol == "dash" {
-         return &title, true
-      }
-   }
-   return nil, false
-}
-
-func (e *Entitlement) Mpd() (*http.Response, error) {
-   return http.Get(e.Manifest)
-}
-
-func (e *Entitlement) License(data []byte) ([]byte, error) {
-   resp, err := http.Post(
-      e.KeyDeliveryUrl, "application/x-protobuf", bytes.NewReader(data),
-   )
+   play1 := &Play{}
+   err = json.NewDecoder(resp.Body).Decode(play1)
    if err != nil {
       return nil, err
    }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
+   return play1, nil
 }

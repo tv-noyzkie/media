@@ -9,6 +9,34 @@ import (
    "strings"
 )
 
+func (n Login) Entitlement(movie1 Movie) (*Entitlement, error) {
+   req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
+   req.URL.Path = "/api/entitlement/v2/asset/" + movie1.Id
+   req.Header.Set("authorization", "Bearer "+n.Token)
+   magine_accesstoken.set(req.Header)
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   var title Entitlement
+   err = json.NewDecoder(resp.Body).Decode(&title)
+   if err != nil {
+      return nil, err
+   }
+   if title.Error != nil {
+      return nil, errors.New(title.Error.UserMessage)
+   }
+   return &title, nil
+}
+
+type Entitlement struct {
+   Error *struct {
+      UserMessage string `json:"user_message"`
+   }
+   Token string
+}
+
 func (n Login) Widevine(play *Playback, data []byte) ([]byte, error) {
    req, err := http.NewRequest(
       "POST", "https://client-api.magine.com/api/playback/v1/widevine/license",
@@ -76,28 +104,6 @@ func (m *Movie) New(custom_id string) error {
 
 type Movie struct {
    Id string
-}
-
-type Entitlement struct {
-   Token string
-}
-
-func (n Login) Entitlement(movie1 Movie) (*Entitlement, error) {
-   req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
-   req.URL.Path = "/api/entitlement/v2/asset/" + movie1.Id
-   req.Header.Set("authorization", "Bearer "+n.Token)
-   magine_accesstoken.set(req.Header)
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   title := &Entitlement{}
-   err = json.NewDecoder(resp.Body).Decode(title)
-   if err != nil {
-      return nil, err
-   }
-   return title, nil
 }
 
 type Login struct {
