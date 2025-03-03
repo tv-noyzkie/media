@@ -15,6 +15,83 @@ type Entitlement struct {
    Protocol string
 }
 
+func (a *Play) Dash() (*Entitlement, bool) {
+   for _, title := range a.Data.ArticleAssetPlay.Entitlements {
+      if title.Protocol == "dash" {
+         return &title, true
+      }
+   }
+   return nil, false
+}
+
+func (u User) Play(article1 *Article, asset1 *Asset) (*Play, error) {
+   data, err := json.Marshal(map[string]any{
+      "query": query_asset,
+      "variables": map[string]int{
+         "article_id": article1.Id,
+         "asset_id": asset1.Id,
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   req, err := http.NewRequest(
+      "POST", "https://api.audienceplayer.com/graphql/2/user",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   // need .Set to match .Get
+   req.Header.Set("authorization", "Bearer " + u.AccessToken)
+   req.Header.Set("content-type", "application/json")
+   req.Header.Set("vpn", "true")
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   play1 := &Play{}
+   err = json.NewDecoder(resp.Body).Decode(play1)
+   if err != nil {
+      return nil, err
+   }
+   return play1, nil
+}
+
+func (a *Article) Film() (*Asset, bool) {
+   for _, asset1 := range a.Assets {
+      if asset1.LinkedType == "film" {
+         return &asset1, true
+      }
+   }
+   return nil, false
+}
+
+func NewUser(email, password string) (Byte[User], error) {
+   data, err := json.Marshal(map[string]any{
+      "query": query_user,
+      "variables": map[string]string{
+         "email": email,
+         "password": password,
+      },
+   })
+   if err != nil {
+      return nil, err
+   }
+   resp, err := http.Post(
+      "https://api.audienceplayer.com/graphql/2/user",
+      "application/json", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+type Address [1]string
+
 func (a Address) Article() (*Article, error) {
    data, err := json.Marshal(map[string]any{
       "query": query_article,
@@ -67,8 +144,6 @@ mutation ArticleAssetPlay($article_id: Int, $asset_id: Int) {
 }
 `
 
-type Address [1]string
-
 const query_article = `
 query Article($articleUrlSlug: String) {
    Article(full_url_slug: $articleUrlSlug) {
@@ -112,47 +187,7 @@ func (e *Entitlement) License(data []byte) ([]byte, error) {
    return io.ReadAll(resp.Body)
 }
 
-func (a *Play) Dash() (*Entitlement, bool) {
-   for _, title := range a.Data.ArticleAssetPlay.Entitlements {
-      if title.Protocol == "dash" {
-         return &title, true
-      }
-   }
-   return nil, false
-}
-
-func (a *Article) Film() (*Asset, bool) {
-   for _, asset1 := range a.Assets {
-      if asset1.LinkedType == "film" {
-         return &asset1, true
-      }
-   }
-   return nil, false
-}
-
 type Byte[T any] []byte
-
-func NewUser(email, password string) (Byte[User], error) {
-   data, err := json.Marshal(map[string]any{
-      "query": query_user,
-      "variables": map[string]string{
-         "email": email,
-         "password": password,
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   resp, err := http.Post(
-      "https://api.audienceplayer.com/graphql/2/user",
-      "application/json", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
 
 func (u *User) Unmarshal(data Byte[User]) error {
    var value struct {
@@ -191,39 +226,4 @@ type Asset struct {
 type Article struct {
    Assets []Asset
    Id     int
-}
-
-func (u User) Play(article1 *Article, asset1 *Asset) (*Play, error) {
-   data, err := json.Marshal(map[string]any{
-      "query": query_asset,
-      "variables": map[string]int{
-         "article_id": article1.Id,
-         "asset_id": asset1.Id,
-      },
-   })
-   if err != nil {
-      return nil, err
-   }
-   req, err := http.NewRequest(
-      "POST", "https://api.audienceplayer.com/graphql/2/user",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   // need .Set to match .Get
-   req.Header.Set("authorization", "Bearer " + u.AccessToken)
-   req.Header.Set("content-type", "application/json")
-   req.Header.Set("vpn", "true")
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   play1 := &Play{}
-   err = json.NewDecoder(resp.Body).Decode(play1)
-   if err != nil {
-      return nil, err
-   }
-   return play1, nil
 }
