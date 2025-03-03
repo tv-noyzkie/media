@@ -9,9 +9,25 @@ import (
    "strings"
 )
 
-type Playback struct {
-   Headers  map[string]string
-   Playlist string // MPD
+func (n Login) Widevine(play *Playback, data []byte) ([]byte, error) {
+   req, err := http.NewRequest(
+      "POST", "https://client-api.magine.com/api/playback/v1/widevine/license",
+      bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   magine_accesstoken.set(req.Header)
+   for key, value := range play.Headers {
+      req.Header.Set(key, value)
+   }
+   req.Header.Set("authorization", "Bearer " + n.Token)
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
 }
 
 func (m *Movie) New(custom_id string) error {
@@ -62,8 +78,6 @@ type Movie struct {
    Id string
 }
 
-type Byte[T any] []byte
-
 type Entitlement struct {
    Token string
 }
@@ -88,55 +102,6 @@ func (n Login) Entitlement(movie1 Movie) (*Entitlement, error) {
 
 type Login struct {
    Token string
-}
-
-func (n Login) Playback(
-   movie1 *Movie, title *Entitlement,
-) (*Playback, error) {
-   req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
-   req.URL.Path = "/api/playback/v1/preflight/asset/" + movie1.Id
-   magine_accesstoken.set(req.Header)
-   magine_play_devicemodel.set(req.Header)
-   magine_play_deviceplatform.set(req.Header)
-   magine_play_devicetype.set(req.Header)
-   magine_play_drm.set(req.Header)
-   magine_play_protocol.set(req.Header)
-   req.Header.Set("authorization", "Bearer "+n.Token)
-   req.Header.Set("magine-play-deviceid", "!")
-   req.Header.Set("magine-play-entitlementid", title.Token)
-   x_forwarded_for.set(req.Header)
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   play1 := &Playback{}
-   err = json.NewDecoder(resp.Body).Decode(play1)
-   if err != nil {
-      return nil, err
-   }
-   return play1, nil
-}
-
-func (n Login) Widevine(play *Playback, data []byte) ([]byte, error) {
-   req, err := http.NewRequest(
-      "POST", "https://client-api.magine.com/api/playback/v1/widevine/license",
-      bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   magine_accesstoken.set(req.Header)
-   for key, value := range play.Headers {
-      req.Header.Set(key, value)
-   }
-   req.Header.Set("authorization", "Bearer " + n.Token)
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
 }
 
 func NewLogin(identity, key string) (Byte[Login], error) {
@@ -216,4 +181,38 @@ query GetCustomIdFullMovie($customId: ID!) {
 
 func graphql_compact(data string) string {
    return strings.Join(strings.Fields(data), " ")
+}
+
+type Playback struct {
+   Headers  map[string]string
+   Playlist string // MPD
+}
+
+type Byte[T any] []byte
+
+func (p *Playback) Unmarshal(data Byte[Playback]) error {
+   return json.Unmarshal(data, p)
+}
+
+func (n Login) Playback(
+   movie1 *Movie, title *Entitlement,
+) (Byte[Playback], error) {
+   req, _ := http.NewRequest("POST", "https://client-api.magine.com", nil)
+   req.URL.Path = "/api/playback/v1/preflight/asset/" + movie1.Id
+   magine_accesstoken.set(req.Header)
+   magine_play_devicemodel.set(req.Header)
+   magine_play_deviceplatform.set(req.Header)
+   magine_play_devicetype.set(req.Header)
+   magine_play_drm.set(req.Header)
+   magine_play_protocol.set(req.Header)
+   req.Header.Set("authorization", "Bearer "+n.Token)
+   req.Header.Set("magine-play-deviceid", "!")
+   req.Header.Set("magine-play-entitlementid", title.Token)
+   x_forwarded_for.set(req.Header)
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
 }

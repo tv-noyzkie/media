@@ -5,17 +5,6 @@ import (
    "time"
 )
 
-func Test(t *testing.T) {
-   for _, test1 := range tests {
-      var movie1 Movie
-      err := movie1.New(test1.custom_id)
-      if err != nil {
-         t.Fatal(err)
-      }
-      time.Sleep(time.Second)
-   }
-}
-
 var tests = []struct {
    content_id string
    custom_id  string
@@ -34,4 +23,15 @@ var tests = []struct {
       custom_id:  "the-card-counter",
       url:        "drakenfilm.se/film/the-card-counter",
    },
+}
+
+func Test(t *testing.T) {
+   for _, test1 := range tests {
+      var movie1 Movie
+      err := movie1.New(test1.custom_id)
+      if err != nil {
+         t.Fatal(err)
+      }
+      time.Sleep(time.Second)
+   }
 }

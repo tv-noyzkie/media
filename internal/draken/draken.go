@@ -4,7 +4,8 @@ import (
    "41.neocities.org/media/draken"
    "41.neocities.org/media/internal"
    "flag"
-   "fmt"
+   "log"
+   "net/http"
    "os"
    "path"
    "path/filepath"
@@ -60,19 +61,43 @@ func main() {
    }
 }
 
+func (f *flags) write_file(name string, data []byte) error {
+   log.Println("WriteFile", f.media + name)
+   return os.WriteFile(f.media + name, data, os.ModePerm)
+}
+
 func (f *flags) authenticate() error {
    data, err := draken.NewLogin(f.email, f.password)
    if err != nil {
       return err
    }
-   log.Println("WriteFile", f.media + "/draken/Login")
-   return os.WriteFile(f.media+"/draken/Login", data, os.ModePerm)
+   return f.write_file("/draken/Login", data)
 }
 
 func (f *flags) download() error {
    if f.dash != "" {
-      f.e.Client = &draken.Client{&login, play}
-      return f.e.Download(&represent)
+      data, err := os.ReadFile(f.media + "/draken/Login")
+      if err != nil {
+         return err
+      }
+      var login draken.Login
+      err = login.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      data, err = os.ReadFile(f.media + "/draken/Playback")
+      if err != nil {
+         return err
+      }
+      var play draken.Playback
+      err = play.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return login.Widevine(&play, data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.dash)
    }
    data, err := os.ReadFile(f.media + "/draken/Login")
    if err != nil {
@@ -92,7 +117,16 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   play, err := login.Playback(&movie, title)
+   data, err = login.Playback(&movie, title)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/draken/Playback", data)
+   if err != nil {
+      return err
+   }
+   var play draken.Playback
+   err = play.Unmarshal(data)
    if err != nil {
       return err
    }
