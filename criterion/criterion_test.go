@@ -6,20 +6,20 @@ import (
    "time"
 )
 
-var tests = []struct{
+var tests = []struct {
    key_id string
-   slug string
-   url string
+   slug   string
+   url    string
 }{
    {
       key_id: "",
-      slug: "wildcat",
-      url: "criterionchannel.com/wildcat",
+      slug:   "wildcat",
+      url:    "criterionchannel.com/wildcat",
    },
    {
       key_id: "e4576465a745213f336c1ef1bf5d513e",
-      slug: "my-dinner-with-andre",
-      url: "criterionchannel.com/videos/my-dinner-with-andre",
+      slug:   "my-dinner-with-andre",
+      url:    "criterionchannel.com/videos/my-dinner-with-andre",
    },
 }
 

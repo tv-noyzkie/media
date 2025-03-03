@@ -9,7 +9,29 @@ import (
    "net/url"
 )
 
-func (t Token) Files(video1 *Video) (Files, error) {
+func (f *File) Widevine(data []byte) ([]byte, error) {
+   req, err := http.NewRequest(
+      "POST", "https://drm.vhx.com/v2/widevine", bytes.NewReader(data),
+   )
+   if err != nil {
+      return nil, err
+   }
+   req.URL.RawQuery = "token=" + f.DrmAuthorizationToken
+   resp, err := http.DefaultClient.Do(req)
+   if err != nil {
+      return nil, err
+   }
+   defer resp.Body.Close()
+   return io.ReadAll(resp.Body)
+}
+
+func (f *Files) Unmarshal(data Byte[Files]) error {
+   return json.Unmarshal(data, f)
+}
+
+type Byte[T any] []byte
+
+func (t Token) Files(video1 *Video) (Byte[Files], error) {
    req, err := http.NewRequest("", video1.Links.Files.Href, nil)
    if err != nil {
       return nil, err
@@ -20,12 +42,7 @@ func (t Token) Files(video1 *Video) (Files, error) {
       return nil, err
    }
    defer resp.Body.Close()
-   var files1 Files
-   err = json.NewDecoder(resp.Body).Decode(&files1)
-   if err != nil {
-      return nil, err
-   }
-   return files1, nil
+   return io.ReadAll(resp.Body)
 }
 
 type File struct {
@@ -58,7 +75,7 @@ type Video struct {
       }
    } `json:"_links"`
    Message string
-   Name string
+   Name    string
 }
 
 type Token struct {
@@ -85,24 +102,6 @@ func (t Token) Video(slug string) (*Video, error) {
    }
    return &video1, nil
 }
-
-func (f *File) Widevine(data []byte) ([]byte, error) {
-   req, err := http.NewRequest(
-      "POST", "https://drm.vhx.com/v2/widevine", bytes.NewReader(data),
-   )
-   if err != nil {
-      return nil, err
-   }
-   req.URL.RawQuery = "token=" + f.DrmAuthorizationToken
-   resp, err := http.DefaultClient.Do(req)
-   if err != nil {
-      return nil, err
-   }
-   defer resp.Body.Close()
-   return io.ReadAll(resp.Body)
-}
-
-type Byte[T any] []byte
 
 func NewToken(username, password string) (Byte[Token], error) {
    resp, err := http.PostForm("https://auth.vhx.com/v1/oauth/token", url.Values{

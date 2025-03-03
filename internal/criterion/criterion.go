@@ -5,8 +5,8 @@ import (
    "41.neocities.org/media/internal"
    "errors"
    "flag"
-   "fmt"
    "log"
+   "net/http"
    "os"
    "path"
    "path/filepath"
@@ -77,8 +77,20 @@ func (f *flags) authenticate() error {
 
 func (f *flags) download() error {
    if f.dash != "" {
-      f.e.Client = file
-      return f.e.Download(&represent)
+      data, err := os.ReadFile(f.media + "/criterion/Files")
+      if err != nil {
+         return err
+      }
+      var files criterion.Files
+      err = files.Unmarshal(data)
+      if err != nil {
+         return err
+      }
+      file, _ := files.Dash()
+      f.e.Widevine = func(data []byte) ([]byte, error) {
+         return file.Widevine(data)
+      }
+      return f.e.Download(f.media + "/Mpd", f.dash)
    }
    data, err := os.ReadFile(f.media + "/criterion/Token")
    if err != nil {
@@ -93,7 +105,16 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   files, err := token.Files(video)
+   data, err = token.Files(video)
+   if err != nil {
+      return err
+   }
+   var files criterion.Files
+   err = files.Unmarshal(data)
+   if err != nil {
+      return err
+   }
+   err = f.write_file("/criterion/Files", data)
    if err != nil {
       return err
    }
