@@ -10,18 +10,39 @@ import (
    "path/filepath"
 )
 
+type flags struct {
+   address  string
+   dash     string
+   e        internal.License
+   email    string
+   media    string
+   password string
+}
+
+func (f *flags) New() error {
+   var err error
+   f.media, err = os.UserHomeDir()
+   if err != nil {
+      return err
+   }
+   f.media = filepath.ToSlash(f.media) + "/media"
+   f.e.ClientId = f.media + "/client_id.bin"
+   f.e.PrivateKey = f.media + "/private_key.pem"
+   return nil
+}
+
 func main() {
    var f flags
    err := f.New()
    if err != nil {
       panic(err)
    }
-   flag.StringVar(&f.email, "e", "", "email")
-   flag.StringVar(&f.representation, "i", "", "representation")
-   flag.StringVar(&f.password, "p", "", "password")
-   flag.StringVar(&f.s.ClientId, "c", f.s.ClientId, "client ID")
-   flag.StringVar(&f.s.PrivateKey, "k", f.s.PrivateKey, "private key")
    flag.StringVar(&f.address, "a", "", "address")
+   flag.StringVar(&f.e.ClientId, "c", f.e.ClientId, "client ID")
+   flag.StringVar(&f.email, "e", "", "email")
+   flag.StringVar(&f.dash, "i", "", "dash ID")
+   flag.StringVar(&f.e.PrivateKey, "k", f.e.PrivateKey, "private key")
+   flag.StringVar(&f.password, "p", "", "password")
    flag.Parse()
    switch {
    case f.password != "":
@@ -29,7 +50,6 @@ func main() {
       if err != nil {
          panic(err)
       }
-
    case f.address != "":
       err := f.download()
       if err != nil {
@@ -40,28 +60,21 @@ func main() {
    }
 }
 
-func (f *flags) New() error {
-   var err error
-   f.home, err = os.UserHomeDir()
+func (f *flags) authenticate() error {
+   data, err := draken.NewLogin(f.email, f.password)
    if err != nil {
       return err
    }
-   f.home = filepath.ToSlash(f.home)
-   f.s.ClientId = f.home + "/widevine/client_id.bin"
-   f.s.PrivateKey = f.home + "/widevine/private_key.pem"
-   return nil
+   log.Println("WriteFile", f.media + "/draken/Login")
+   return os.WriteFile(f.media+"/draken/Login", data, os.ModePerm)
 }
 
-type flags struct {
-   address        string
-   email          string
-   home           string
-   password       string
-   representation string
-   s              internal.Stream
-}
 func (f *flags) download() error {
-   data, err := os.ReadFile(f.home + "/draken.txt")
+   if f.dash != "" {
+      f.e.Client = &draken.Client{&login, play}
+      return f.e.Download(&represent)
+   }
+   data, err := os.ReadFile(f.media + "/draken/Login")
    if err != nil {
       return err
    }
@@ -75,7 +88,7 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   title, err := login.Entitlement(&movie)
+   title, err := login.Entitlement(movie)
    if err != nil {
       return err
    }
@@ -83,26 +96,9 @@ func (f *flags) download() error {
    if err != nil {
       return err
    }
-   represents, err := internal.Mpd(play)
+   resp, err := http.Get(play.Playlist)
    if err != nil {
       return err
    }
-   for _, represent := range represents {
-      switch f.representation {
-      case "":
-         fmt.Print(&represent, "\n\n")
-      case represent.Id:
-         f.s.Client = &draken.Client{&login, play}
-         return f.s.Download(&represent)
-      }
-   }
-   return nil
-}
-
-func (f *flags) authenticate() error {
-   data, err := draken.Login{}.Marshal(f.email, f.password)
-   if err != nil {
-      return err
-   }
-   return os.WriteFile(f.home+"/draken.txt", data, os.ModePerm)
+   return internal.Mpd(f.media + "/Mpd", resp)
 }
